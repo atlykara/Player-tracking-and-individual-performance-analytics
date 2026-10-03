@@ -31,6 +31,13 @@ Kaynaklar hakkında notlar:
 - TeamTrack'te fisheye + drone (top-view) görüntüleri mevcut.
 - YouTube'da da birkaç video var ama kameralar sabit değil.
 
+## Video bilgisi (118575, 1. yarı)
+
+- Çözünürlük: 4096 × 1080 (panoramik), 25 fps
+- Süre: 2874 s (47:54), 71850 kare
+- Çalışma klibi: ilk 60 s → 1500 kare (`data/processed/test_60s.mp4`)
+- Gözlem: kenarlarda belirgin panoramik bükülme; uzak taraftaki oyuncular çok küçük.
+
 ## Araçlar
 
 - Python
