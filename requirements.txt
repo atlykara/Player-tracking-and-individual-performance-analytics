@@ -1,0 +1,5 @@
+# PyTorch is intentionally NOT listed here. Install the CUDA build first:
+#   pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 --index-url https://download.pytorch.org/whl/cu124
+# A plain "torch" line would make pip install the CPU-only build from PyPI.
+
+ultralytics==8.4.171
