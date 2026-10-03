@@ -1,0 +1,22 @@
+# Raw data and videos (large, not versioned)
+data/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Model weights
+*.pt
+*.pth
+
+# Heavy generated outputs (folder itself is kept via .gitkeep)
+outputs/*
+!outputs/.gitkeep
+
+# Course documents kept out of the repository
+SWE402_SeniorDesignProject.*
+
+# Python environment and caches
+.venv/
+__pycache__/
+*.pyc
