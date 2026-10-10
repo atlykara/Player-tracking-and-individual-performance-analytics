@@ -13,6 +13,9 @@ data/
 outputs/*
 !outputs/.gitkeep
 
+# Ultralytics default run folder (relative project= paths also land here)
+runs/
+
 # Course documents kept out of the repository
 SWE402_SeniorDesignProject.*
 
