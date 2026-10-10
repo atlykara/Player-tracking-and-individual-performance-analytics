@@ -87,3 +87,34 @@ Observations:
 - 575 track IDs for 22 players means heavy ID fragmentation (largest raw
   ID: 4774). No matching against the GT has been done yet; these are raw
   counts, not MOT metrics.
+
+### Quality evaluation (no GT)
+
+Run on 2026-10-10 with `src/tracking_io.py` v1 (labels → `tracks.csv`,
+pixel boxes, frames shifted to 0-based to match the GT numbering) and
+`src/evaluate_quality.py` v1. The ground truth was **not** used.
+Outputs: `outputs/evaluation/118575_yolo11m_botsort/`
+(`quality_metrics.json`, `quality_report.md`, `detections_per_frame.png`,
+`track_lifetimes.png`).
+
+| Measure | Value |
+|---|---|
+| Boxes per frame: mean / std / min / max | 24.81 / 1.83 / 18 / 31 |
+| Frames without boxes | 0 |
+| Unique IDs / ID ratio (IDs ÷ mean boxes per frame) | 575 / 23.2 |
+| Track lifetime: mean / median | 5.43 s / 1.04 s |
+| Lifetime buckets: < 1 s / 1-5 s / 5-30 s / > 30 s | 285 / 159 / 105 / 26 |
+| Short tracks (< 2 s) | 347 (60.3 %) |
+| Tracks with gaps / missing frames inside tracks | 250 / 3577 |
+| Jumps (> 50 px between consecutive frames, same ID) | 0 |
+| Confidence: mean / median / share < 0.4 | 0.612 / 0.686 / 17.7 % |
+
+Notes:
+
+- Jump threshold 50 px/frame: rough image scale ~38 px/m on the near
+  touchline (no calibration yet); a 10 m/s sprint is ~15 px/frame at 25 fps.
+  Measured consecutive-frame centre shifts: 99.9th percentile 12.5 px,
+  maximum 19.6 px. The tracker does not produce jumps; its identity errors
+  show up as fragmentation (new IDs) instead.
+- Jumps are only checked between consecutive frames; a move across a gap
+  inside a track is not counted.
