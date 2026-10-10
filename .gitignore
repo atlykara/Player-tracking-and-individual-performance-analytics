@@ -12,6 +12,12 @@ data/
 # Heavy generated outputs (folder itself is kept via .gitkeep)
 outputs/*
 !outputs/.gitkeep
+# Small, reviewable results are versioned: per-run tracks.csv and the
+# evaluation reports. Labels folders and videos stay out.
+!outputs/tracking/
+outputs/tracking/*/*
+!outputs/tracking/*/tracks.csv
+!outputs/evaluation/
 
 # Ultralytics default run folder (relative project= paths also land here)
 runs/
