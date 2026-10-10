@@ -3,3 +3,4 @@
 # A plain "torch" line would make pip install the CPU-only build from PyPI.
 
 ultralytics==8.4.171
+lap==0.5.13
