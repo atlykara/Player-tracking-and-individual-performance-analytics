@@ -81,3 +81,20 @@ The row format is unchanged and frame numbers stay 0-based.
 | Frames | 0-2999 (3000 frames) |
 | Unique ids | 22 |
 | Boxes per frame | 22 |
+
+### GT viewing video
+
+`src/draw_gt_video.py` draws the ground truth on the working clip so the
+annotation can be watched like a tracking result:
+`outputs/gt_video/118575_gt.mp4` (not versioned; same resolution and fps as
+the clip, 3000 frames, ~138 MB after H.264 re-encoding with ffmpeg, CRF 23).
+
+Drawing rules:
+
+- the GT is read with `evaluate_tracking.load_ground_truth()`, the only GT
+  reader in the project;
+- every GT ID keeps one colour for the whole clip (hue derived from the ID)
+  and shows its number above the box;
+- rows with `is_valid = False` (MOT rule: `conf == 0` or non-person class)
+  would be drawn thin and grey; this GT has none;
+- top-left corner: frame number and the number of valid GT boxes in it.
