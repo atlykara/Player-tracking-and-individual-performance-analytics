@@ -1,9 +1,15 @@
-"""Draw the ground-truth boxes on the clip to make the GT watchable (v1).
+"""Draw tracked boxes on the clip to make a box table watchable (v2).
 
-Every GT ID keeps one colour for the whole video and shows its number above
-the box, so a viewer can follow one player and judge what "perfect" tracking
-looks like before comparing it with the tracker output. The GT is read with
-evaluate_tracking.load_ground_truth(), so there is a single GT reader.
+v1 drew only the ground truth. v2 makes the drawing generic: any table with
+the columns `frame, track_id, x, y, w, h` (pixels, top-left origin, frame
+0-based) can be drawn, so the ground truth and the tracker output
+(`tracks.csv`) go through the same code and look the same. Keeping one
+drawing function avoids two copies that drift apart (the same mistake the
+earlier project made with its windowing logic).
+
+Every ID keeps one colour for the whole video and shows its number above
+the box, so a viewer can follow one player. The GT is read with
+evaluate_tracking.load_ground_truth(), so there is still a single GT reader.
 """
 
 import shutil
@@ -12,13 +18,16 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pandas as pd
 
 from evaluate_tracking import load_ground_truth
 
 # --- Settings -------------------------------------------------------------
 VIDEO_PATH = "data/SoccerTrackv2/mot/118575.mp4"
 GT_PATH = "data/SoccerTrackv2/mot/118575_gt.txt"
-OUTPUT_PATH = "outputs/gt_video/118575_gt.mp4"
+TRACKS_PATH = "outputs/tracking/118575_yolo11m_botsort/tracks.csv"
+GT_OUTPUT_PATH = "outputs/gt_video/118575_gt.mp4"
+TRACKS_OUTPUT_PATH = "outputs/gt_video/118575_tracks.mp4"
 LINE_WIDTH = 2
 FONT_SCALE = 0.7
 INVALID_COLOR = (128, 128, 128)   # rows with is_valid = False: grey and thin
@@ -35,8 +44,8 @@ def id_color(track_id):
     return tuple(int(c) for c in cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0])
 
 
-def draw_frame(img, rows, frame):
-    """Draw one frame's GT rows and the frame counter in the top-left corner."""
+def draw_frame(img, rows, frame, title):
+    """Draw one frame's rows and a counter '<title> frame N boxes K' top-left."""
     for row in rows.itertuples():
         x, y, w, h = int(row.x), int(row.y), int(row.w), int(row.h)
         if row.is_valid:
@@ -47,12 +56,19 @@ def draw_frame(img, rows, frame):
         cv2.putText(img, str(row.track_id), (x, y - 4),
                     cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, color, 2)
     n_valid = int(rows["is_valid"].sum())
-    cv2.putText(img, f"frame {frame}  GT boxes {n_valid}", (20, 50),
+    cv2.putText(img, f"{title}  frame {frame}  boxes {n_valid}", (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
 
 
-def write_video(gt, video_path, output_path):
-    """Read the clip frame by frame, draw the GT and write an mp4 of the same size/fps."""
+def write_video(boxes, video_path, output_path, title):
+    """Read the clip frame by frame, draw the boxes and write an mp4 of the same size/fps.
+
+    `boxes` needs the columns frame, track_id, x, y, w, h. An optional
+    `is_valid` column (from the GT reader) marks rows drawn grey; tables
+    without it, like tracks.csv, are treated as all valid.
+    """
+    if "is_valid" not in boxes.columns:
+        boxes = boxes.assign(is_valid=True)
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise FileNotFoundError(f"Cannot open video: {video_path}")
@@ -60,14 +76,14 @@ def write_video(gt, video_path, output_path):
     size = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     out = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
 
-    by_frame = dict(list(gt.groupby("frame")))
-    empty = gt.iloc[:0]
+    by_frame = dict(list(boxes.groupby("frame")))
+    empty = boxes.iloc[:0]
     frame = 0
     while True:
         ok, img = cap.read()
         if not ok:
             break
-        draw_frame(img, by_frame.get(frame, empty), frame)
+        draw_frame(img, by_frame.get(frame, empty), frame, title)
         out.write(img)
         frame += 1
     cap.release()
@@ -87,14 +103,20 @@ def compress_with_ffmpeg(path):
     print(f"Compressed (H.264): {path.stat().st_size / 1e6:.1f} MB")
 
 
-def main():
-    """Load GT, draw it on the clip, compress the result."""
-    output = Path(OUTPUT_PATH)
+def draw_boxes(boxes, output_path, title, video_path=VIDEO_PATH):
+    """Draw one box table on the clip, compress the result and report the path."""
+    output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    gt = load_ground_truth(GT_PATH)
-    write_video(gt, VIDEO_PATH, output)
+    print(f"{title:<17}: {len(boxes)} boxes, {boxes['track_id'].nunique()} IDs")
+    write_video(boxes, video_path, output, title)
     compress_with_ffmpeg(output)
     print(f"Saved to         : {output}")
+
+
+def main():
+    """Draw the ground truth and the tracker output with the same function."""
+    draw_boxes(load_ground_truth(GT_PATH), GT_OUTPUT_PATH, "GT")
+    draw_boxes(pd.read_csv(TRACKS_PATH), TRACKS_OUTPUT_PATH, "tracks")
 
 
 if __name__ == "__main__":
