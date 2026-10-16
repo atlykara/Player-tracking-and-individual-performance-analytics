@@ -107,3 +107,40 @@ Drawing rules:
   non-person class) are drawn thin and grey; this GT has none, and tables
   without the column (tracks.csv) are treated as all valid;
 - top-left corner: table name, frame number and the number of boxes in it.
+
+## Region of interest
+
+The panoramic camera also sees the area around the pitch: substitutes,
+coaches and officials standing outside the lines are detected as persons and
+would enter the tracking as false players. A polygon around the pitch (the
+region of interest, ROI) marks where players can be; detections outside it
+can be discarded.
+
+**How it was selected:** `src/select_roi.py` shows the first frame of
+`118575.mp4` scaled down to fit the screen. The pitch corners were clicked
+by hand, slightly **outside** the touchlines and goal lines, so that players
+standing on a line are not cut off. A magnifier at the bottom centre
+shows the original pixels around the cursor (4x) for precise clicks on the
+far corners. Controls: left click adds a corner,
+`u` removes the last one, Enter saves (at least 3 corners), Esc cancels.
+
+| File | Content |
+|---|---|
+| `data/roi/118575_roi.json` | polygon corners (versioned) |
+| `data/roi/118575_roi_check.jpg` | polygon drawn on the first frame, for visual checking (versioned) |
+
+JSON format:
+
+```
+{"video": "data/SoccerTrackv2/mot/118575.mp4", "width": 4096, "height": 1080,
+ "points": [[x, y], ...]}
+```
+
+**Coordinate space rule:** the points are stored in **original video
+pixels** (4096 x 1080), rounded to 0.1 px. Clicks on the scaled-down window
+are divided by the display scale before saving. The ground truth and the
+tracker output are in this same pixel space, so inside/outside tests compare
+like with like. The `video` field records which video the polygon belongs to.
+
+`load_roi()` in the same module returns the corners as an `(N, 2)` int32
+array for later steps.

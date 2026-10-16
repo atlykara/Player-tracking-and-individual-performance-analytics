@@ -1,5 +1,8 @@
-# Raw data and videos (large, not versioned)
-data/
+# Raw data and videos (large, not versioned). `data/*` instead of `data/`
+# so that the small ROI files below can be re-included.
+data/*
+!data/roi/
+!data/roi/*
 *.mp4
 *.avi
 *.mov
