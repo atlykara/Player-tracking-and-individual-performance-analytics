@@ -67,6 +67,10 @@ absolute `project=` path.
 - Label frame numbers are **1-based** (1 ... 3000):
   label file `118575_N.txt` corresponds to GT frame `N - 1`
 
+These outputs, the evaluation folder below and `tracks.csv` were deleted on
+2026-10-16, when the ROI run replaced this run; the numbers in this entry
+are kept as the before-ROI baseline (`tracks.csv` remains in git history).
+
 Versioned evidence in `docs/`:
 
 - `tracking_118575_frame.jpg` — annotated frame at t = 60 s from the output video
@@ -183,7 +187,9 @@ In `outputs/tracking/118575_yolo11m_botsort_roi/`:
 - `tracks.csv`: `frame` (0-based), `track_id`, `x, y, w, h` (pixels,
   top-left), `conf` (versioned).
 - `118575.mp4`: boxes drawn on the original (unmasked) frame, ROI outline
-  semi-transparent (575 MB, not versioned).
+  semi-transparent (575 MB, not versioned; deleted on 2026-10-16 in favour
+  of `118575_tracks.mp4`).
+- `118575_tracks.mp4`: tracking video regenerated from this run's `tracks.csv` by `src/draw_boxes_video.py` (yellow ROI outline).
 - `sample_frame.jpg`: frame 1500 of the output video.
 
 The output of the run without ROI is kept for comparison.

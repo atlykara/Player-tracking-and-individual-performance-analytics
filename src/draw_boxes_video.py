@@ -21,13 +21,18 @@ import numpy as np
 import pandas as pd
 
 from evaluate_tracking import load_ground_truth
+from select_roi import load_roi
 
 # --- Settings -------------------------------------------------------------
 VIDEO_PATH = "data/SoccerTrackv2/mot/118575.mp4"
 GT_PATH = "data/SoccerTrackv2/mot/118575_gt.txt"
-TRACKS_PATH = "outputs/tracking/118575_yolo11m_botsort/tracks.csv"
-GT_OUTPUT_PATH = "outputs/gt_video/118575_gt.mp4"
-TRACKS_OUTPUT_PATH = "outputs/gt_video/118575_tracks.mp4"
+RUN_NAME = "118575_yolo11m_botsort_roi"   # tracking run whose tracks.csv is drawn
+TRACKS_PATH = f"outputs/tracking/{RUN_NAME}/tracks.csv"
+ROI_PATH = "data/roi/118575_roi.json"
+DRAW_ROI_OUTLINE = True          # thin yellow ROI polygon on the tracks video
+ROI_COLOR = (0, 255, 255)        # BGR yellow
+GT_OUTPUT_PATH = "outputs/tracking/118575_gt.mp4"
+TRACKS_OUTPUT_PATH = f"outputs/tracking/{RUN_NAME}/118575_tracks.mp4"
 LINE_WIDTH = 2
 FONT_SCALE = 0.7
 INVALID_COLOR = (128, 128, 128)   # rows with is_valid = False: grey and thin
@@ -60,12 +65,13 @@ def draw_frame(img, rows, frame, title):
                 cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
 
 
-def write_video(boxes, video_path, output_path, title):
+def write_video(boxes, video_path, output_path, title, roi=None):
     """Read the clip frame by frame, draw the boxes and write an mp4 of the same size/fps.
 
     `boxes` needs the columns frame, track_id, x, y, w, h. An optional
     `is_valid` column (from the GT reader) marks rows drawn grey; tables
-    without it, like tracks.csv, are treated as all valid.
+    without it, like tracks.csv, are treated as all valid. `roi` (N x 2
+    pixel polygon) is drawn as a thin outline when given.
     """
     if "is_valid" not in boxes.columns:
         boxes = boxes.assign(is_valid=True)
@@ -84,6 +90,8 @@ def write_video(boxes, video_path, output_path, title):
         if not ok:
             break
         draw_frame(img, by_frame.get(frame, empty), frame, title)
+        if roi is not None:
+            cv2.polylines(img, [roi], True, ROI_COLOR, 1, cv2.LINE_AA)
         out.write(img)
         frame += 1
     cap.release()
@@ -103,12 +111,12 @@ def compress_with_ffmpeg(path):
     print(f"Compressed (H.264): {path.stat().st_size / 1e6:.1f} MB")
 
 
-def draw_boxes(boxes, output_path, title, video_path=VIDEO_PATH):
+def draw_boxes(boxes, output_path, title, video_path=VIDEO_PATH, roi=None):
     """Draw one box table on the clip, compress the result and report the path."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     print(f"{title:<17}: {len(boxes)} boxes, {boxes['track_id'].nunique()} IDs")
-    write_video(boxes, video_path, output, title)
+    write_video(boxes, video_path, output, title, roi)
     compress_with_ffmpeg(output)
     print(f"Saved to         : {output}")
 
@@ -116,7 +124,8 @@ def draw_boxes(boxes, output_path, title, video_path=VIDEO_PATH):
 def main():
     """Draw the ground truth and the tracker output with the same function."""
     draw_boxes(load_ground_truth(GT_PATH), GT_OUTPUT_PATH, "GT")
-    draw_boxes(pd.read_csv(TRACKS_PATH), TRACKS_OUTPUT_PATH, "tracks")
+    roi = load_roi(ROI_PATH) if DRAW_ROI_OUTLINE else None
+    draw_boxes(pd.read_csv(TRACKS_PATH), TRACKS_OUTPUT_PATH, "tracks", roi=roi)
 
 
 if __name__ == "__main__":

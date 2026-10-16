@@ -91,8 +91,8 @@ directly (v1 of the script, `draw_gt_video.py`, drew only the GT).
 
 | Input | Output (not versioned) |
 |---|---|
-| `118575_gt.txt` via `evaluate_tracking.load_ground_truth()` | `outputs/gt_video/118575_gt.mp4` |
-| `outputs/tracking/118575_yolo11m_botsort/tracks.csv` | `outputs/gt_video/118575_tracks.mp4` |
+| `118575_gt.txt` via `evaluate_tracking.load_ground_truth()` | `outputs/tracking/118575_gt.mp4` |
+| `outputs/tracking/118575_yolo11m_botsort_roi/tracks.csv` | `outputs/tracking/118575_yolo11m_botsort_roi/118575_tracks.mp4` |
 
 Both videos keep the clip's resolution and fps (3000 frames) and are
 re-encoded with ffmpeg (H.264, CRF 23).

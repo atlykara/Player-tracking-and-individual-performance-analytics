@@ -27,10 +27,10 @@ import pandas as pd
 from scipy.optimize import linear_sum_assignment
 
 # --- Settings -------------------------------------------------------------
-LABELS_DIR = "outputs/tracking/118575_yolo11m_botsort/labels"
+LABELS_DIR = "outputs/tracking/118575_yolo11m_botsort_roi/labels"
 VIDEO_PATH = "data/SoccerTrackv2/mot/118575.mp4"
 GT_PATH = "data/SoccerTrackv2/mot/118575_gt.txt"
-OUTPUT_DIR = "outputs/evaluation/118575_yolo11m_botsort"
+OUTPUT_DIR = "outputs/evaluation/118575_yolo11m_botsort_roi"
 
 IOU_THRESHOLD = 0.5       # standard CLEAR MOT value: boxes must overlap at least half
 MOSTLY_TRACKED = 0.8      # GT track matched in more than 80 % of its frames
