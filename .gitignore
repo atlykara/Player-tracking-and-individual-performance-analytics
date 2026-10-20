@@ -20,7 +20,7 @@ outputs/*
 !outputs/tracking/
 outputs/tracking/*/*
 !outputs/tracking/*/tracks.csv
-!outputs/evaluation/
+!outputs/tracking/*/evaluation/
 
 # Ultralytics default run folder (relative project= paths also land here)
 runs/

@@ -1,10 +1,10 @@
 """Tracking performance against the ground truth (v1).
 
 Compares the tracker output with the SoccerTrack v2 ground truth (GT) frame
-by frame and computes the CLEAR MOT metrics (MOTA, MOTP) and the ID metrics
-(IDF1, ID switches, mostly tracked / lost). All counting is written here on
-purpose, without a ready-made MOT evaluation library, so every number can be
-explained step by step. Only scipy's Hungarian algorithm is reused.
+by frame and computes the key tracking metrics: MOTA, IDF1, precision,
+recall, ID switches, FP / FN and the number of IDs. All counting is written
+here on purpose, without a ready-made MOT evaluation library, so every number
+can be explained step by step. Only scipy's Hungarian algorithm is reused.
 
 Ultralytics `yolo track ... save_txt=True save_conf=True` writes one label
 file per frame, `<video>_<N>.txt`, one row per tracked box:
@@ -30,11 +30,9 @@ from scipy.optimize import linear_sum_assignment
 LABELS_DIR = "outputs/tracking/118575_yolo11m_botsort_roi/labels"
 VIDEO_PATH = "data/SoccerTrackv2/mot/118575.mp4"
 GT_PATH = "data/SoccerTrackv2/mot/118575_gt.txt"
-OUTPUT_DIR = "outputs/evaluation/118575_yolo11m_botsort_roi"
+OUTPUT_DIR = "outputs/tracking/118575_yolo11m_botsort_roi/evaluation"
 
 IOU_THRESHOLD = 0.5       # standard CLEAR MOT value: boxes must overlap at least half
-MOSTLY_TRACKED = 0.8      # GT track matched in more than 80 % of its frames
-MOSTLY_LOST = 0.2         # GT track matched in less than 20 % of its frames
 PREVIEW_WIDTH = 2048      # width of alignment_check.jpg
 
 # Ultralytics numbers label files from 1, the GT numbers frames from 0
@@ -129,17 +127,17 @@ def iou_matrix(a, b):
 def match_frame(gt_boxes, pred_boxes):
     """Hungarian matching on cost 1 - IoU; pairs below IOU_THRESHOLD are dropped.
 
-    Returns a list of (gt_index, pred_index, iou).
+    Returns a list of (gt_index, pred_index).
     """
     if len(gt_boxes) == 0 or len(pred_boxes) == 0:
         return []
     iou = iou_matrix(gt_boxes, pred_boxes)
     rows, cols = linear_sum_assignment(1 - iou)
-    return [(r, c, iou[r, c]) for r, c in zip(rows, cols) if iou[r, c] >= IOU_THRESHOLD]
+    return [(r, c) for r, c in zip(rows, cols) if iou[r, c] >= IOU_THRESHOLD]
 
 
 def evaluate(gt, pred):
-    """Match every frame, count errors and return (metrics, per-frame table).
+    """Match every frame, count errors and return the metrics as a dict.
 
     Only GT rows with is_valid = True take part.
     """
@@ -147,31 +145,26 @@ def evaluate(gt, pred):
     gt_by_frame = dict(list(gt.groupby("frame")))
     pred_by_frame = dict(list(pred.groupby("frame")))
     empty = gt.iloc[:0]
+    frames = sorted(set(gt_by_frame) | set(pred_by_frame))
 
     last_pred_of = {}         # GT ID -> prediction ID it was last matched to
     pair_frames = Counter()   # (GT ID, pred ID) -> frames they were matched
-    iou_sum, rows = 0.0, []
-    for frame in sorted(set(gt_by_frame) | set(pred_by_frame)):
+    tp = idsw = 0
+    for frame in frames:
         g = gt_by_frame.get(frame, empty)
         p = pred_by_frame.get(frame, empty)
-        matches = match_frame(g[BOX].to_numpy(float), p[BOX].to_numpy(float))
-
-        idsw = 0
-        for gi, pi, iou in matches:
+        for gi, pi in match_frame(g[BOX].to_numpy(float), p[BOX].to_numpy(float)):
             gid, pid = g["track_id"].iat[gi], p["track_id"].iat[pi]
             # ID switch: this GT player is now followed by a different track ID.
             if gid in last_pred_of and last_pred_of[gid] != pid:
                 idsw += 1
             last_pred_of[gid] = pid
             pair_frames[(gid, pid)] += 1
-            iou_sum += iou
-        tp = len(matches)
-        rows.append({"frame": frame, "n_gt": len(g), "n_pred": len(p), "tp": tp,
-                     "fp": len(p) - tp, "fn": len(g) - tp, "idsw": idsw})
-    per_frame = pd.DataFrame(rows)
+            tp += 1
 
-    tp, fp, fn, idsw = (int(per_frame[c].sum()) for c in ["tp", "fp", "fn", "idsw"])
+    # Every box that was not matched is an error of its own side.
     n_gt, n_pred = len(gt), len(pred)
+    fp, fn = n_pred - tp, n_gt - tp
 
     # IDF1: one fixed pred ID per GT ID for the whole video (one-to-one),
     # chosen to maximise the frames where the pair is matched (IDTP).
@@ -182,28 +175,18 @@ def evaluate(gt, pred):
     for (gid, pid), n in pair_frames.items():
         counts[g_index[gid], p_index[pid]] = n
     r, c = linear_sum_assignment(counts, maximize=True)
-    idtp = int(counts[r, c].sum())
-
-    # Mostly tracked / lost: share of each GT track's frames that were matched.
-    matched_per_gt = Counter()
-    for (gid, _), n in pair_frames.items():
-        matched_per_gt[gid] += n
-    ratio = pd.Series({g: matched_per_gt[g] / n for g, n in gt["track_id"].value_counts().items()})
+    idtp = counts[r, c].sum()
 
     m = {
-        "iou_threshold": IOU_THRESHOLD,
-        "frames": len(per_frame), "gt_boxes": n_gt, "pred_boxes": n_pred,
+        "iou_threshold": IOU_THRESHOLD, "frames": len(frames),
         "gt_ids": len(gt_ids), "pred_ids": len(pred_ids),
         "tp": tp, "fp": fp, "fn": fn, "idsw": idsw,
         "precision": tp / (tp + fp), "recall": tp / (tp + fn),
         "mota": 1 - (fn + fp + idsw) / n_gt,
-        "motp": iou_sum / tp if tp else 0.0,
-        "idtp": idtp, "idf1": 2 * idtp / (n_gt + n_pred),
-        "mostly_tracked": int((ratio > MOSTLY_TRACKED).sum()),
-        "mostly_lost": int((ratio < MOSTLY_LOST).sum()),
+        "idf1": 2 * idtp / (n_gt + n_pred),
     }
-    m["partially_tracked"] = m["gt_ids"] - m["mostly_tracked"] - m["mostly_lost"]
-    return {k: round(v, 4) if isinstance(v, float) else v for k, v in m.items()}, per_frame
+    return {k: round(float(v), 4) if isinstance(v, (float, np.floating)) else v
+            for k, v in m.items()}
 
 
 def self_test(gt):
@@ -212,7 +195,7 @@ def self_test(gt):
     This checks the counting code, not the tracker: if a perfect prediction
     does not give 1.0 / 0 everywhere, the evaluation itself is wrong.
     """
-    m, _ = evaluate(gt, gt[gt["is_valid"]].copy())
+    m = evaluate(gt, gt[gt["is_valid"]].copy())
     ok = (m["precision"] == m["recall"] == m["mota"] == m["idf1"] == 1
           and m["idsw"] == m["fp"] == m["fn"] == 0)
     print(f"Self-test        : {'PASSED' if ok else 'FAILED'} "
@@ -223,36 +206,28 @@ def self_test(gt):
 
 
 # --- Outputs --------------------------------------------------------------
-# Metric key -> (label, one-sentence meaning) for the Markdown report.
-DESCRIPTIONS = {
-    "frames": ("Frames", "Frames compared."),
-    "gt_boxes": ("GT boxes", "Valid player boxes in the ground truth."),
-    "pred_boxes": ("Predicted boxes", "Boxes reported by the tracker."),
-    "gt_ids": ("GT IDs", "Different players in the ground truth."),
-    "pred_ids": ("Predicted IDs", "Different track IDs handed out by the tracker."),
-    "tp": ("TP", "Predicted boxes matched to a GT box with IoU >= threshold."),
-    "fp": ("FP", "Predicted boxes with no matching GT box (extra or misplaced boxes)."),
-    "fn": ("FN", "GT boxes with no matching prediction (missed players)."),
-    "idsw": ("ID switches", "Times a GT player became matched to a different track ID than before."),
-    "precision": ("Precision", "Share of predicted boxes that are correct."),
-    "recall": ("Recall", "Share of GT boxes that were found."),
-    "mota": ("MOTA", "1 minus all errors (FN + FP + IDSW) per GT box; can be negative."),
-    "motp": ("MOTP (mean IoU)", "How tightly matched boxes overlap the GT, on average."),
-    "idtp": ("IDTP", "Matched boxes that also carry the one track ID assigned to that player for the whole clip."),
-    "idf1": ("IDF1", "F1 score of identity: how well one player keeps one ID over the whole clip."),
-    "mostly_tracked": ("Mostly tracked", f"GT players matched in more than {MOSTLY_TRACKED:.0%} of their frames."),
-    "partially_tracked": ("Partially tracked", "GT players between the two limits."),
-    "mostly_lost": ("Mostly lost", f"GT players matched in less than {MOSTLY_LOST:.0%} of their frames."),
-}
+# Report rows: (label, metric keys shown as "a / b", one-sentence meaning).
+REPORT_ROWS = [
+    ("MOTA", ["mota"], "Overall score: 1 minus all errors (FN + FP + ID switches) per GT box; can be negative."),
+    ("IDF1", ["idf1"], "Identity score: how well one player keeps one track ID over the whole clip."),
+    ("Precision", ["precision"], "Share of predicted boxes that match a real player."),
+    ("Recall", ["recall"], "Share of real players (GT boxes) that were found."),
+    ("ID switches", ["idsw"], "Times a GT player became matched to a different track ID than before."),
+    ("GT IDs / Predicted IDs", ["gt_ids", "pred_ids"], "Real players vs. track IDs handed out; equal numbers would mean no fragmentation."),
+    ("FP / FN", ["fp", "fn"], "Extra or misplaced boxes / missed GT boxes."),
+]
 
 
 def write_report(m, path):
-    """Write the metrics as an English Markdown table."""
-    lines = ["# Tracking performance report (with ground truth)", "",
+    """Write the key metrics as a short English Markdown report."""
+    lines = ["# Tracking evaluation report (ROI run vs. ground truth)", "",
              f"Labels: `{LABELS_DIR}`  ", f"Ground truth: `{GT_PATH}`  ",
              f"IoU threshold: {IOU_THRESHOLD}", "",
              "| Metric | Value | Meaning |", "|---|---|---|"]
-    lines += [f"| {label} | {m[key]} | {text} |" for key, (label, text) in DESCRIPTIONS.items()]
+    for label, keys, text in REPORT_ROWS:
+        lines.append(f"| {label} | {' / '.join(str(m[k]) for k in keys)} | {text} |")
+    lines += ["", f"Values refer to this {m['frames']}-frame clip only; a box counts as "
+                  f"correct when it overlaps a GT box with IoU >= {IOU_THRESHOLD}."]
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -287,14 +262,13 @@ def main():
     self_test(gt)
 
     pred = load_predictions()
-    m, per_frame = evaluate(gt, pred)
+    m = evaluate(gt, pred)
     (out_dir / "performance_metrics.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
     write_report(m, out_dir / "performance_report.md")
-    per_frame.to_csv(out_dir / "per_frame.csv", index=False)
     save_alignment_check(gt, pred, out_dir / "alignment_check.jpg")
 
-    for key, (label, _) in DESCRIPTIONS.items():
-        print(f"{label:<20}: {m[key]}")
+    for label, keys, _ in REPORT_ROWS:
+        print(f"{label:<23}: {' / '.join(str(m[k]) for k in keys)}")
     print(f"Outputs saved to {out_dir}")
 
 
