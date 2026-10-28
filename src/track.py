@@ -13,8 +13,12 @@ label format, the ground truth and evaluate_tracking.py work unchanged.
 Outputs in OUTPUT_DIR:
 - labels/<video>_<N>.txt  same format and naming as `yolo track save_txt`
   (N is 1-based, rows: class xc yc w h conf id, normalised)
-- tracks.csv              frame (0-based), track_id, x, y, w, h, conf in pixels
+- tracks.csv              frame (0-based), track_id, x, y, w, h, conf,
+                          foot_x, foot_y in pixels
 - <video>.mp4             boxes drawn on the ORIGINAL (unmasked) frame
+
+torch and ultralytics are imported inside the functions that need them, so
+other scripts can import foot_point() without loading the model libraries.
 """
 
 import json
@@ -24,9 +28,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
-import torch
-from ultralytics import YOLO
-from ultralytics.utils.plotting import colors
 
 from select_roi import load_roi
 
@@ -46,6 +47,45 @@ ROI_ALPHA = 0.4            # outline opacity: visible but does not hide players
 BOX_THICKNESS = 2
 FONT_SCALE = 0.7
 FONT_THICKNESS = 2
+
+
+def foot_point(x, y, w, h):
+    """Bottom centre of a box (x, y = top-left corner, pixels): (x + w/2, y + h).
+
+    This is the box point closest to where the player touches the ground.
+    The box centre lies above the ground, so after perspective projection it
+    lands on the pitch behind the player. Homography, heatmaps, distance and
+    speed will all use this point. Limits: a player who falls, slides or is
+    in the air does not touch the ground at this point, so the position is
+    off for those frames.
+    """
+    return x + w / 2, y + h
+
+
+def add_foot_columns(tracks):
+    """Add foot_x, foot_y to a table with the columns x, y, w, h."""
+    tracks["foot_x"], tracks["foot_y"] = foot_point(tracks["x"], tracks["y"], tracks["w"], tracks["h"])
+    return tracks
+
+
+def save_tracks_csv(tracks, path):
+    """Write tracks.csv with foot point columns, rounded to 0.1 px."""
+    tracks = add_foot_columns(tracks[["frame", "track_id", "x", "y", "w", "h", "conf"]].copy())
+    tracks.round({"x": 1, "y": 1, "w": 1, "h": 1, "conf": 2, "foot_x": 1, "foot_y": 1}).to_csv(
+        path, index=False)
+
+
+def rebuild_tracks_csv(labels_dir=f"{OUTPUT_DIR}/labels", output_path=f"{OUTPUT_DIR}/tracks.csv"):
+    """Rebuild tracks.csv from the saved label files, without running the tracker.
+
+    The labels are read with evaluate_tracking.load_predictions(), so there
+    is one label reader in the project.
+    """
+    from evaluate_tracking import load_predictions
+    tracks = load_predictions(labels_dir, VIDEO_PATH)
+    save_tracks_csv(tracks, output_path)
+    print(f"Rebuilt {output_path}: {len(tracks)} rows, {tracks['track_id'].nunique()} IDs")
+    return tracks
 
 
 def load_checked_roi(path, video_path):
@@ -73,13 +113,14 @@ def feet_inside(boxes, polygon):
     """
     keep = []
     for x1, y1, x2, y2 in boxes.xyxy.tolist():
-        foot = ((x1 + x2) / 2, y2)
+        foot = foot_point(x1, y1, x2 - x1, y2 - y1)
         keep.append(cv2.pointPolygonTest(polygon, foot, False) >= 0)
     return keep
 
 
 def draw_tracks(frame, boxes):
     """Draw a thin box and a compact 'id conf' label for every track."""
+    from ultralytics.utils.plotting import colors
     for (x1, y1, x2, y2), tid, conf in zip(
         boxes.xyxy.int().tolist(), boxes.id.int().tolist(), boxes.conf.tolist()
     ):
@@ -98,6 +139,9 @@ def draw_roi(frame, polygon):
 
 def run_tracking():
     """Track players inside the ROI and write labels, tracks.csv and a video."""
+    import torch
+    from ultralytics import YOLO
+
     if not torch.cuda.is_available():   # stop instead of silently using the CPU
         raise RuntimeError("CUDA GPU not available; refusing to run on CPU.")
     print(f"Device: {torch.cuda.get_device_name(0)}")
@@ -145,7 +189,7 @@ def run_tracking():
     writer.release()
 
     tracks = pd.DataFrame(rows, columns=["frame", "track_id", "x", "y", "w", "h", "conf"])
-    tracks.round({"x": 1, "y": 1, "w": 1, "h": 1, "conf": 2}).to_csv(out_dir / "tracks.csv", index=False)
+    save_tracks_csv(tracks, out_dir / "tracks.csv")
 
     elapsed = time.time() - start
     print(f"Frames processed   : {frame_idx}")

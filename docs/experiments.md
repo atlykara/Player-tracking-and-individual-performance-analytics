@@ -215,3 +215,61 @@ Observations:
   tracked.
 - The ROI edge runs very close to the near touchline. The white outline
   lies on the white line there and is hard to see in the video.
+
+---
+
+## 2026-10-29 — Foot point
+
+**Goal:** give every box one ground point. This is the point that later goes
+to the pitch (homography), so heatmaps, distance and speed are all built on
+it.
+
+### Definition
+
+`foot_point(x, y, w, h) = (x + w/2, y + h)`, the bottom centre of the box
+(x, y = top-left corner, original 4096 x 1080 pixels).
+
+- **Why the bottom centre:** it is the box point closest to where the
+  player touches the ground. The box centre lies about half a body height
+  above the ground; projected onto the pitch with perspective, it lands
+  behind the player, further from the camera.
+- **Limits:** a player who falls, slides or jumps does not touch the ground
+  at this point, so the position is off for those frames. A box that is
+  cut by occlusion or by the frame edge also moves the point.
+
+### Where it is defined
+
+Only in `src/track.py` (`foot_point()`). Every other use goes through it:
+
+- the ROI filter in `track.py` (a box is kept if its foot point is inside
+  the polygon),
+- `tracks.csv`, which now has the columns `foot_x, foot_y`
+  (`add_foot_columns()`),
+- `src/draw_boxes_video.py`, which draws the point as a small filled dot,
+  for the tracker output and for the ground truth.
+
+`tracks.csv` of `118575_yolo11m_botsort_roi` was rebuilt from the saved
+label files with `track.rebuild_tracks_csv()`, without running the tracker
+again: 62,565 rows, 448 IDs (unchanged). Box values differ from the earlier
+file by at most 0.1 px (rounding of the normalised label values).
+
+### Current output video
+
+**Decision:** from this stage on, the project continues on the **ground
+truth** boxes and IDs (22 players, 22 IDs), not on the tracker output
+(448 IDs, IDF1 far below MOTA). The later stages (homography, distance,
+speed, heatmaps) can then be measured without tracking errors mixed in.
+The tracker is kept for comparison.
+
+`outputs/118575_latest.mp4` is the project's **current output video**:
+the ground truth boxes, GT IDs, foot points (computed from the GT boxes with
+`track.foot_point()`) and the ROI outline on the original frame
+(`SOURCE = "gt"` in `draw_boxes_video.py`). Every new stage overwrites it.
+It replaces `outputs/tracking/118575_gt.mp4`.
+The tracker output drawn the same way (`SOURCE = "tracking"`) stays in its
+run folder: `outputs/tracking/118575_yolo11m_botsort_roi/118575_tracks.mp4`.
+
+Both videos were checked against the source: 4096 x 1080, 25 fps, 3000
+frames, H.264 (CRF 23), about 140 MB each (not versioned). The middle frame
+of the current video (frame 1500, 22 GT boxes) is
+`outputs/118575_latest_frame.jpg` (versioned).

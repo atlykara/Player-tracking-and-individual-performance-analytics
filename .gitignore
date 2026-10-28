@@ -32,3 +32,7 @@ SWE402_SeniorDesignProject.*
 .venv/
 __pycache__/
 *.pyc
+
+# Middle frame of the current output video (small, versioned).
+# The videos themselves stay out through outputs/* and *.mp4.
+!outputs/118575_latest_frame.jpg
