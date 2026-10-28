@@ -36,3 +36,9 @@ __pycache__/
 # Middle frame of the current output video (small, versioned).
 # The videos themselves stay out through outputs/* and *.mp4.
 !outputs/118575_latest_frame.jpg
+
+# Movement stage: movement.csv is ~8.4 MB, so it stays out; the small
+# consistency report is versioned.
+!outputs/movement/
+outputs/movement/*/*
+!outputs/movement/*/consistency_report.md

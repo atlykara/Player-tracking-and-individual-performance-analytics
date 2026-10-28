@@ -273,3 +273,68 @@ Both videos were checked against the source: 4096 x 1080, 25 fps, 3000
 frames, H.264 (CRF 23), about 140 MB each (not versioned). The middle frame
 of the current video (frame 1500, 22 GT boxes) is
 `outputs/118575_latest_frame.jpg` (versioned).
+
+---
+
+## 2026-10-29 — Movement (pixel space)
+
+**Goal:** per-frame foot point movement for every GT player, in pixels and
+px/s only. Metres, m/s and km/h come after the homography stage, which
+sets the pixel-to-metre scale.
+
+### Input
+
+- `outputs/tracking/118575_gt/tracks.csv`: the ground truth in tracks.csv
+  format (`frame, track_id, x, y, w, h, conf, foot_x, foot_y`), written by
+  `track.export_gt_tracks_csv()`. 66,000 rows, 22 IDs, every ID in all
+  3000 frames, no frame gaps. GT boxes are whole pixels, so foot_x moves
+  in steps of 0.5 px.
+- fps (25.00) and duration (120.00 s) are read from
+  `data/SoccerTrackv2/mot/118575.mp4`.
+
+### Method (`src/movement.py` v1)
+
+Per track, sorted by frame: `timestamp = frame / fps`; `dx, dy, dt` to the
+previous row; `pixel_speed = sqrt(dx² + dy²) / dt`. The first row of each
+track has these fields empty. Movement uses the foot point, not the box
+centre (the box centre also moves when only the box height changes).
+
+Flags are added next to the untouched raw columns: `gap_flag`,
+`outlier_flag`. Project rule: rows are never
+deleted and never interpolated, only flagged.
+
+| Constant | Value | Reason |
+|---|---|---|
+| `GAP_FRAMES` | 3 | a step longer than 3 frames (0.12 s) is a gap |
+| `OUTLIER_SPEED_PX_S` | 290 px/s | ≈ p99.7 of the raw speed (288.7 px/s) |
+
+Raw speed distribution (65,978 steps, px/s): p50 35.4, p90 112.5,
+p99 226.4, p99.5 265.8, p99.7 288.7, p99.9 340.2, max 575.1.
+290 px/s (11.6 px in one frame) flags about the fastest 0.3 % of steps for
+a closer look. It is a pixel threshold: a player near the camera covers
+more pixels for the same run, so flags gather near the camera. A metric
+threshold replaces it after the homography.
+
+### Summary numbers
+
+| Measure | Value |
+|---|---|
+| Rows / tracks | 66,000 / 22 |
+| Consistency checks passed | 4 / 4 (timestamps, monotonic frames, no duplicates, 120.00 s covered) |
+| Gap rows | 0 |
+| Outlier rows (> 290 px/s) | 198 (0.30 %) |
+| Short-lived tracks (< 2 s) | 0 |
+| Raw speed mean / median / max | 49.1 / 35.4 / 575.1 px/s |
+
+Observation: the smallest non-zero raw step is 0.5 px per frame
+(12.5 px/s), so box jitter alone creates speed.
+
+### Outputs
+
+- `outputs/movement/118575_gt/movement.csv`: all columns, 3 decimals
+  (8.4 MB, not versioned).
+- `outputs/movement/118575_gt/consistency_report.md` (versioned).
+- `outputs/118575_latest.mp4` regenerated with fading 3 s foot point
+  trails (`draw_boxes_video.py` v4, raw foot points): newest point
+  large and opaque, older points smaller and fainter, in the track colour.
+  Rendering takes about 7.5 min for 3000 frames.

@@ -40,6 +40,7 @@ IMGSZ = 2560               # video is 4096 px wide; default 640 misses far playe
 CLASSES = [0]              # COCO class 0 = person
 HALF = True                # FP16 inference, as in the run without ROI
 OUTPUT_DIR = "outputs/tracking/118575_yolo11m_botsort_roi"
+GT_TRACKS_PATH = "outputs/tracking/118575_gt/tracks.csv"   # GT in tracks.csv format
 
 DRAW_ROI_OUTLINE = True
 ROI_COLOR = (255, 255, 255)
@@ -86,6 +87,20 @@ def rebuild_tracks_csv(labels_dir=f"{OUTPUT_DIR}/labels", output_path=f"{OUTPUT_
     save_tracks_csv(tracks, output_path)
     print(f"Rebuilt {output_path}: {len(tracks)} rows, {tracks['track_id'].nunique()} IDs")
     return tracks
+
+
+def export_gt_tracks_csv(output_path=GT_TRACKS_PATH):
+    """Write the ground truth as a tracks.csv (same columns, with foot points).
+
+    The project continues on the GT boxes and IDs, so later stages read the
+    GT in the same format as a tracker run. GT conf is -1 (not annotated).
+    """
+    from evaluate_tracking import GT_PATH, load_ground_truth
+    gt = load_ground_truth(GT_PATH)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    save_tracks_csv(gt, output_path)
+    print(f"Exported {output_path}: {len(gt)} rows, {gt['track_id'].nunique()} IDs")
+    return gt
 
 
 def load_checked_roi(path, video_path):

@@ -32,11 +32,17 @@ Run from the project root:
    `tracks.csv` with foot points).
 3. `python src/evaluate_tracking.py`: compares the tracking with the
    ground truth, writes the `evaluation/` folder of the run.
-4. `python src/draw_boxes_video.py`: draws the table chosen by `SOURCE`
-   (`"gt"`, default → `outputs/118575_latest.mp4`; `"tracking"` → the
-   tracker video in the run folder).
+4. `python -c "import sys; sys.path.insert(0, 'src'); import track; track.export_gt_tracks_csv()"`:
+   writes the ground truth as `outputs/tracking/118575_gt/tracks.csv`
+   (with foot points).
+5. `python src/movement.py`: foot point movement in pixels and px/s
+   (`dx, dy, dt, pixel_speed`, gap / outlier flags), writes
+   `outputs/movement/118575_gt/movement.csv` and `consistency_report.md`.
+6. `python src/draw_boxes_video.py`: draws the table chosen by `SOURCE`
+   (`"gt"`, default → `outputs/118575_latest.mp4`, with foot point trails
+   from step 5; `"tracking"` → the tracker video in the run folder).
 
 Steps 2–3 only matter for the tracker comparison; the current output needs
-steps 1 (ROI outline) and 4.
+steps 1 (ROI outline), 4, 5 and 6.
 
 Experiment notes and measured numbers: `docs/experiments.md`.

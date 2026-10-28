@@ -1,11 +1,13 @@
-"""Draw tracked boxes and foot points on the clip (v3).
+"""Draw tracked boxes, foot points and trails on the clip (v4).
 
 v1 drew only the ground truth. v2 made the drawing generic: any table with
 the columns `frame, track_id, x, y, w, h` (pixels, top-left origin, frame
 0-based) can be drawn, so the ground truth and the tracker output
 (`tracks.csv`) go through the same code and look the same. v3 adds the foot
 point (a small filled dot, the point that later goes to the pitch) and
-chooses the table with one constant, SOURCE.
+chooses the table with one constant, SOURCE. v4 draws the last few seconds
+of every foot point as a fading trail, read from movement.py's output, so
+movement and its jitter can be seen in the video.
 
 Every ID keeps one colour for the whole video and shows its number above
 the box, so a viewer can follow one player. The GT is read with
@@ -48,6 +50,11 @@ LINE_WIDTH = 2
 FONT_SCALE = 0.7
 INVALID_COLOR = (128, 128, 128)   # rows with is_valid = False: grey and thin
 H264_CRF = 23                     # ffmpeg quality; 23 is the usual default
+# Foot point trails from movement.py; drawn only if the table exists.
+DRAW_TRAILS = True
+MOVEMENT_PATHS = {"gt": "outputs/movement/118575_gt/movement.csv"}
+TRAIL_SECONDS = 3.0              # length of the trail behind each player
+TRAIL_FADE_STEPS = 4             # opacity levels; each costs one blend of the frame
 
 
 def id_color(track_id):
@@ -78,6 +85,40 @@ def draw_frame(img, rows, frame, title):
                 cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
 
 
+def load_trails(source):
+    """Return {track_id: (frames, xy points)} from movement.csv, or None."""
+    path = MOVEMENT_PATHS.get(source)
+    if not DRAW_TRAILS or path is None or not Path(path).exists():
+        print(f"Trails           : off (no movement table for {source!r})")
+        return None
+    cols = ["foot_x", "foot_y"]
+    table = pd.read_csv(path, usecols=["frame", "track_id", *cols]).sort_values("frame")
+    print(f"Trails           : {path} ({cols[0]}, {cols[1]}), {TRAIL_SECONDS:g} s")
+    return {tid: (g["frame"].to_numpy(), g[cols].to_numpy())
+            for tid, g in table.groupby("track_id")}
+
+
+def draw_trails(img, trails, frame, fps):
+    """Draw the last TRAIL_SECONDS of every track: newest point large and opaque.
+
+    Points are split into TRAIL_FADE_STEPS age bands. Each band is drawn on a
+    copy of the frame and blended in with its own opacity, oldest band first,
+    so a few blends give a smooth fade instead of one blend per point.
+    """
+    n = round(TRAIL_SECONDS * fps)
+    for band in range(TRAIL_FADE_STEPS):          # 0 = oldest ... last = newest
+        overlay = img.copy()
+        for tid, (frames, xy) in trails.items():
+            lo, hi = np.searchsorted(frames, [frame - n + 1, frame + 1])
+            for f, (x, y) in zip(frames[lo:hi], xy[lo:hi]):
+                fresh = 1 - (frame - f) / n        # 1 = current frame, -> 0 = oldest
+                if min(int(fresh * TRAIL_FADE_STEPS), TRAIL_FADE_STEPS - 1) == band:
+                    radius = max(1, round(FOOT_RADIUS * fresh))
+                    cv2.circle(overlay, (round(x), round(y)), radius, id_color(tid), -1, cv2.LINE_AA)
+        alpha = (band + 1) / TRAIL_FADE_STEPS
+        cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, dst=img)
+
+
 def video_info(path):
     """Return (width, height, fps, frame count) of a video."""
     cap = cv2.VideoCapture(str(path))
@@ -89,7 +130,8 @@ def video_info(path):
     return info
 
 
-def write_video(boxes, video_path, output_path, title, roi=None, frame_image_path=None):
+def write_video(boxes, video_path, output_path, title, roi=None, frame_image_path=None,
+                trails=None):
     """Read the clip frame by frame, draw the boxes and write an mp4 of the same size/fps.
 
     `boxes` needs the columns frame, track_id, x, y, w, h, foot_x, foot_y. An
@@ -97,6 +139,7 @@ def write_video(boxes, video_path, output_path, title, roi=None, frame_image_pat
     tables without it, like tracks.csv, are treated as all valid. `roi` (N x 2
     pixel polygon) is drawn as a thin outline when given. If
     `frame_image_path` is given, the middle frame is also saved as an image.
+    `trails` (from load_trails) are drawn under the boxes.
     """
     if "is_valid" not in boxes.columns:
         boxes = boxes.assign(is_valid=True)
@@ -112,6 +155,8 @@ def write_video(boxes, video_path, output_path, title, roi=None, frame_image_pat
         ok, img = cap.read()
         if not ok:
             break
+        if trails:
+            draw_trails(img, trails, frame, fps)
         draw_frame(img, by_frame.get(frame, empty), frame, title)
         if roi is not None:
             cv2.polylines(img, [roi], True, ROI_COLOR, 1, cv2.LINE_AA)
@@ -145,12 +190,13 @@ def check_same_format(source_path, output_path):
         raise RuntimeError(f"Output video differs from source: {src} vs {dst}")
 
 
-def draw_boxes(boxes, output_path, title, video_path=VIDEO_PATH, roi=None, frame_image_path=None):
+def draw_boxes(boxes, output_path, title, video_path=VIDEO_PATH, roi=None, frame_image_path=None,
+               trails=None):
     """Draw one box table on the clip, compress and check the result."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     print(f"{title:<17}: {len(boxes)} boxes, {boxes['track_id'].nunique()} IDs")
-    write_video(boxes, video_path, output, title, roi, frame_image_path)
+    write_video(boxes, video_path, output, title, roi, frame_image_path, trails)
     compress_with_ffmpeg(output)
     check_same_format(video_path, output)
     print(f"Saved to         : {output}")
@@ -167,7 +213,8 @@ def main(source=SOURCE):
     if "foot_x" not in boxes.columns:   # the GT has no foot point; same formula as tracking
         boxes = add_foot_columns(boxes)
     roi = load_roi(ROI_PATH) if DRAW_ROI_OUTLINE else None
-    draw_boxes(boxes, OUTPUT_PATHS[source], source, roi=roi, frame_image_path=frame_image)
+    draw_boxes(boxes, OUTPUT_PATHS[source], source, roi=roi, frame_image_path=frame_image,
+               trails=load_trails(source))
 
 
 if __name__ == "__main__":
