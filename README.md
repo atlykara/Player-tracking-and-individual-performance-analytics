@@ -36,7 +36,7 @@ Run from the project root:
    writes the ground truth as `outputs/tracking/118575_gt/tracks.csv`
    (with foot points).
 5. `python src/movement.py`: foot point movement in pixels and px/s
-   (`dx, dy, dt, pixel_speed`, gap / outlier flags), writes
+   (`dx, dy, dt, pixel_speed`, smoothing, gap / outlier flags), writes
    `outputs/movement/118575_gt/movement.csv` and `consistency_report.md`.
 6. `python src/draw_boxes_video.py`: draws the table chosen by `SOURCE`
    (`"gt"`, default → `outputs/118575_latest.mp4`, with foot point trails

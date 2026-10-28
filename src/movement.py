@@ -27,6 +27,8 @@ TRACKS_CSV = "outputs/tracking/118575_gt/tracks.csv"
 VIDEO_PATH = "data/SoccerTrackv2/mot/118575.mp4"   # fps and duration are read from here
 OUT_DIR = "outputs/movement/118575_gt"
 GAP_FRAMES = 3          # a step longer than 3 frames (0.12 s at 25 fps) is a gap
+SMOOTH_WINDOW = 5       # centred moving average over 5 frames (0.2 s): removes
+                        # 1-2 px box jitter but keeps real changes of direction
 # Measured raw speed distribution on the GT (66,000 rows): p99 = 226 px/s,
 # p99.5 = 266, p99.7 = 289, p99.9 = 340, max = 575 px/s. 290 px/s flags about
 # the fastest 0.3 % of steps (11.6 px in one frame) for a closer look. It is a
@@ -34,6 +36,8 @@ GAP_FRAMES = 3          # a step longer than 3 frames (0.12 s at 25 fps) is a ga
 # gather there; a metric threshold follows after the homography.
 OUTLIER_SPEED_PX_S = 290
 SHORT_TRACK_SECONDS = 2.0   # tracks shorter than this are reported as short-lived
+SMOOTH_NEGLIGIBLE_PCT = 5   # median speed change below 5 %: smoothing is not needed
+STANDING_PX = 2             # net foot movement below 2 px in 1 s counts as standing
 PERCENTILES = [50, 90, 99, 99.5, 99.7, 99.9]
 
 
@@ -48,10 +52,10 @@ def video_fps_and_duration(path):
 
 
 def compute_movement(df, fps):
-    """Add timestamp, dx, dy, dt, pixel_speed and flags.
+    """Add timestamp, dx, dy, dt, pixel_speed, smoothed values and flags.
 
     Every value is computed inside one track (groupby track_id), so the first
-    row of a track has empty dx, dy, dt and pixel_speed, and no value mixes
+    row of a track has empty dx, dy, dt and speeds, and smoothing never mixes
     two tracks. Raw columns are not changed.
     """
     df = df.sort_values(["track_id", "frame"]).reset_index(drop=True)
@@ -61,6 +65,13 @@ def compute_movement(df, fps):
     df["dy"] = by_track["foot_y"].diff()
     df["dt"] = by_track["timestamp"].diff()
     df["pixel_speed"] = np.hypot(df["dx"], df["dy"]) / df["dt"]
+
+    for col in ["x", "y"]:
+        df[f"smooth_{col}"] = by_track[f"foot_{col}"].transform(
+            lambda s: s.rolling(SMOOTH_WINDOW, center=True, min_periods=1).mean())
+    by_track = df.groupby("track_id")
+    step = np.hypot(by_track["smooth_x"].diff(), by_track["smooth_y"].diff())
+    df["smooth_speed"] = step / df["dt"]
 
     df["gap_flag"] = df["dt"] > GAP_FRAMES / fps
     df["outlier_flag"] = df["pixel_speed"] > OUTLIER_SPEED_PX_S
@@ -75,6 +86,36 @@ def speed_percentiles(speed):
     return stats
 
 
+def smoothing_effect(df, fps):
+    """Report lines comparing raw and smoothed speed (measurement only).
+
+    If smoothing changed the median by less than SMOOTH_NEGLIGIBLE_PCT, the
+    input has no jitter worth removing. A "standing" row is one whose foot
+    point moved less than STANDING_PX between 0.5 s before and 0.5 s after it;
+    its raw speed is pure box jitter.
+    """
+    speed, smooth = df["pixel_speed"].dropna(), df["smooth_speed"].dropna()
+    rows = ["## Smoothing effect (measurement only)", "",
+            "| | raw px/s | smoothed px/s | difference |", "|---|---|---|---|"]
+    for name, q in [("median", 50), ("p99", 99)]:
+        raw, smo = np.percentile(speed, q), np.percentile(smooth, q)
+        rows.append(f"| {name} | {raw:.1f} | {smo:.1f} | {100 * (raw - smo) / raw:.1f} % |")
+    half = round(fps / 2)
+    by_track = df.groupby("track_id")
+    net = np.hypot(by_track["foot_x"].shift(-half) - by_track["foot_x"].shift(half),
+                   by_track["foot_y"].shift(-half) - by_track["foot_y"].shift(half))
+    standing = df.loc[net < STANDING_PX, "pixel_speed"].dropna()
+    median_diff = 100 * (speed.median() - smooth.median()) / speed.median()
+    rows += ["", f"Standing player (net movement < {STANDING_PX} px in 1 s, {len(standing)} rows): "
+             f"raw speed mean {standing.mean():.1f}, p90 {standing.quantile(0.9):.1f} px/s.", ""]
+    if median_diff < SMOOTH_NEGLIGIBLE_PCT:
+        rows.append("GT input has no jitter; smoothing is not needed.")
+    else:
+        rows.append(f"Smoothing changes the median by {median_diff:.1f} % "
+                    f"(>= {SMOOTH_NEGLIGIBLE_PCT} %): the smoothed columns are kept.")
+    return rows + [""]
+
+
 def write_consistency_report(df, out_md, fps, video_seconds):
     """Check the movement table and write a short Markdown report."""
     n, n_steps = len(df), int(df["dt"].notna().sum())
@@ -86,7 +127,7 @@ def write_consistency_report(df, out_md, fps, video_seconds):
         "no duplicate (track_id, frame)": not df.duplicated(["track_id", "frame"]).any(),
         f"covered time {covered:.2f} s ~ video {video_seconds:.2f} s": abs(covered - video_seconds) <= 1 / fps,
     }
-    speed = df["pixel_speed"].dropna()
+    speed, smooth = df["pixel_speed"].dropna(), df["smooth_speed"].dropna()
     gaps, outliers = int(df["gap_flag"].sum()), int(df["outlier_flag"].sum())
     short = int((life < SHORT_TRACK_SECONDS).sum())
     pct = speed_percentiles(df["pixel_speed"])
@@ -107,14 +148,17 @@ def write_consistency_report(df, out_md, fps, video_seconds):
               "## Speed (px/s)", "",
               "| | mean | median | max |", "|---|---|---|---|",
               f"| raw | {speed.mean():.1f} | {speed.median():.1f} | {speed.max():.1f} |",
-              "",
+              f"| smoothed ({SMOOTH_WINDOW} frames) | {smooth.mean():.1f} | {smooth.median():.1f} "
+              f"| {smooth.max():.1f} |", "",
               "Raw percentiles: " + ", ".join(f"{k} = {v:.1f}" for k, v in pct.items()), ""]
+    lines += smoothing_effect(df, fps)
     lines += ["## Interpretation", "",
               f"All {len(checks)} checks {'pass' if all(checks.values()) else 'do NOT all pass'}. "
               f"There are {gaps} gaps and {short} short-lived tracks, so every track covers "
               f"{life.min():.1f}-{life.max():.1f} s of the {video_seconds:.0f} s clip. "
               f"The smallest non-zero raw step is {min_step:g} px per frame ({min_step * fps:g} px/s), "
-              "so box jitter alone produces speed. "
+              f"so box jitter alone produces speed: smoothing lowers the mean from {speed.mean():.1f} "
+              f"to {smooth.mean():.1f} px/s. "
               f"{outliers} rows ({100 * outliers / n_steps:.2f} %) exceed {OUTLIER_SPEED_PX_S} px/s; "
               "they are flagged, not removed."]
     Path(out_md).write_text("\n".join(lines) + "\n", encoding="utf-8")

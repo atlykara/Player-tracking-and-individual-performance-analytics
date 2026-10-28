@@ -299,13 +299,15 @@ previous row; `pixel_speed = sqrt(dx² + dy²) / dt`. The first row of each
 track has these fields empty. Movement uses the foot point, not the box
 centre (the box centre also moves when only the box height changes).
 
-Flags are added next to the untouched raw columns: `gap_flag`,
-`outlier_flag`. Project rule: rows are never
+Derived columns are added next to the untouched raw columns:
+`smooth_x, smooth_y` (centred moving average inside the track),
+`smooth_speed`, `gap_flag`, `outlier_flag`. Project rule: rows are never
 deleted and never interpolated, only flagged.
 
 | Constant | Value | Reason |
 |---|---|---|
 | `GAP_FRAMES` | 3 | a step longer than 3 frames (0.12 s) is a gap |
+| `SMOOTH_WINDOW` | 5 frames (0.2 s) | removes 1-2 px box jitter, keeps changes of direction |
 | `OUTLIER_SPEED_PX_S` | 290 px/s | ≈ p99.7 of the raw speed (288.7 px/s) |
 
 Raw speed distribution (65,978 steps, px/s): p50 35.4, p90 112.5,
@@ -325,9 +327,18 @@ threshold replaces it after the homography.
 | Outlier rows (> 290 px/s) | 198 (0.30 %) |
 | Short-lived tracks (< 2 s) | 0 |
 | Raw speed mean / median / max | 49.1 / 35.4 / 575.1 px/s |
+| Smoothed speed mean / median / max | 43.3 / 28.3 / 342.5 px/s |
 
 Observation: the smallest non-zero raw step is 0.5 px per frame
-(12.5 px/s), so box jitter alone creates speed.
+(12.5 px/s), so box jitter alone creates speed. Smoothing lowers the mean
+by 12 % and the maximum by 40 %.
+
+Smoothing check (measurement only, in `consistency_report.md`): raw vs
+smoothed speed differs by 20.0 % at the median (35.4 vs 28.3 px/s) and by
+13.8 % at p99 (226.4 vs 195.3 px/s). A standing player (net movement
+< 2 px in 1 s, 4,115 rows) still has a raw speed of 6.3 px/s on average
+(p90 25.0 px/s) from 0.5-1 px box steps. The difference is above the 5 %
+"negligible" limit, so the smoothed columns are kept.
 
 ### Outputs
 
@@ -335,6 +346,6 @@ Observation: the smallest non-zero raw step is 0.5 px per frame
   (8.4 MB, not versioned).
 - `outputs/movement/118575_gt/consistency_report.md` (versioned).
 - `outputs/118575_latest.mp4` regenerated with fading 3 s foot point
-  trails (`draw_boxes_video.py` v4, raw foot points): newest point
+  trails (`draw_boxes_video.py` v4, `USE_SMOOTH = True`): newest point
   large and opaque, older points smaller and fainter, in the track colour.
   Rendering takes about 7.5 min for 3000 frames.

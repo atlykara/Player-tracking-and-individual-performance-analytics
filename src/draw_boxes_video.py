@@ -54,6 +54,7 @@ H264_CRF = 23                     # ffmpeg quality; 23 is the usual default
 DRAW_TRAILS = True
 MOVEMENT_PATHS = {"gt": "outputs/movement/118575_gt/movement.csv"}
 TRAIL_SECONDS = 3.0              # length of the trail behind each player
+USE_SMOOTH = True                # smooth_x/smooth_y (True) or raw foot_x/foot_y
 TRAIL_FADE_STEPS = 4             # opacity levels; each costs one blend of the frame
 
 
@@ -91,7 +92,7 @@ def load_trails(source):
     if not DRAW_TRAILS or path is None or not Path(path).exists():
         print(f"Trails           : off (no movement table for {source!r})")
         return None
-    cols = ["foot_x", "foot_y"]
+    cols = ["smooth_x", "smooth_y"] if USE_SMOOTH else ["foot_x", "foot_y"]
     table = pd.read_csv(path, usecols=["frame", "track_id", *cols]).sort_values("frame")
     print(f"Trails           : {path} ({cols[0]}, {cols[1]}), {TRAIL_SECONDS:g} s")
     return {tid: (g["frame"].to_numpy(), g[cols].to_numpy())
