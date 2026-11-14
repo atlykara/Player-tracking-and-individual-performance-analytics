@@ -349,3 +349,88 @@ smoothed speed differs by 20.0 % at the median (35.4 vs 28.3 px/s) and by
   trails (`draw_boxes_video.py` v4, `USE_SMOOTH = True`): newest point
   large and opaque, older points smaller and fainter, in the track colour.
   Rendering takes about 7.5 min for 3000 frames.
+
+---
+
+## 2026-11-14 — Pitch landmark selection
+
+**Goal:** collect pairs of (pixel position, pitch position in metres) for the
+pitch calibration. No homography is computed in this step.
+
+### Command
+
+```
+python src/calibrate.py select --video data/SoccerTrackv2/mot/118575.mp4 --frame 0
+```
+
+Re-click one landmark: `python src/calibrate.py select --redo NAME`.
+A second run without `--redo` asks only for the landmarks that have no row
+yet.
+
+### Method (`src/calibrate.py` v1, `select`)
+
+- The landmark names and metre values come from `config/field_config.yaml`
+  (31 landmarks, pitch model 105 x 68 m; see "Pitch coordinate system" in
+  `docs/data.md`). The tool asks for them in config order.
+- The frame is shown scaled down to fit the screen. A magnifier in a top
+  corner shows the original pixels around the cursor (4x) with a crosshair.
+  The saved value is the **original 4096 x 1080 pixel** under the crosshair.
+- The mouse moves in window pixels, so a click can only land on every
+  `1 / display scale` original pixel ("click step", printed by the tool).
+- Controls: left click = save, `s` = skip, `u` = undo last click,
+  `q` = finish.
+
+### Outputs
+
+- `config/calibration_points.csv`: `name, x_m, y_m, px_x, px_y`, one row per
+  clicked landmark (skipped landmarks have no row).
+- `outputs/calibration/118575_points.jpg`: the full-resolution frame with
+  every clicked point drawn and labelled (name and metres; not versioned).
+
+### Clicked points
+
+To be filled in after the selection run.
+
+| Measure | Value |
+|---|---|
+| Frame used | |
+| Click step (original px per window px) | |
+| Landmarks clicked / in config | / 31 |
+| Landmarks skipped | |
+
+| Landmark | x_m | y_m | px_x | px_y | Note |
+|---|---|---|---|---|---|
+| corner_left_far | 0 | 0 | | | |
+| corner_left_near | 0 | 68 | | | |
+| corner_right_far | 105 | 0 | | | |
+| corner_right_near | 105 | 68 | | | |
+| halfway_far | 52.5 | 0 | | | |
+| halfway_near | 52.5 | 68 | | | |
+| centre_spot | 52.5 | 34 | | | |
+| centre_circle_far | 52.5 | 24.85 | | | |
+| centre_circle_near | 52.5 | 43.15 | | | |
+| centre_circle_left | 43.35 | 34 | | | |
+| centre_circle_right | 61.65 | 34 | | | |
+| left_pen_far_goal | 0 | 13.84 | | | |
+| left_pen_near_goal | 0 | 54.16 | | | |
+| left_pen_far_in | 16.5 | 13.84 | | | |
+| left_pen_near_in | 16.5 | 54.16 | | | |
+| left_goalarea_far_goal | 0 | 24.84 | | | |
+| left_goalarea_near_goal | 0 | 43.16 | | | |
+| left_goalarea_far_in | 5.5 | 24.84 | | | |
+| left_goalarea_near_in | 5.5 | 43.16 | | | |
+| left_post_far | 0 | 30.34 | | | |
+| left_post_near | 0 | 37.66 | | | |
+| right_pen_far_goal | 105 | 13.84 | | | |
+| right_pen_near_goal | 105 | 54.16 | | | |
+| right_pen_far_in | 88.5 | 13.84 | | | |
+| right_pen_near_in | 88.5 | 54.16 | | | |
+| right_goalarea_far_goal | 105 | 24.84 | | | |
+| right_goalarea_near_goal | 105 | 43.16 | | | |
+| right_goalarea_far_in | 99.5 | 24.84 | | | |
+| right_goalarea_near_in | 99.5 | 43.16 | | | |
+| right_post_far | 105 | 30.34 | | | |
+| right_post_near | 105 | 37.66 | | | |
+
+The Note column records why a landmark was skipped or is uncertain (hidden
+by a player, outside the frame, line not visible).

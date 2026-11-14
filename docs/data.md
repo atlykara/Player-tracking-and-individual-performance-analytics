@@ -144,3 +144,61 @@ like with like. The `video` field records which video the polygon belongs to.
 
 `load_roi()` in the same module returns the corners as an `(N, 2)` int32
 array for later steps.
+
+## Pitch coordinate system
+
+Player positions are reported on a flat model of the pitch, in metres.
+The model and all named points are defined in `config/field_config.yaml`;
+no pitch measurement is written in Python code.
+
+| | Definition |
+|---|---|
+| Model size | 105 x 68 m, from the dataset metadata of match 118575 (`118575_tracker_box_metadata.xml`: `<pitch width="105" height="68"/>`); also the FIFA standard size |
+| x axis | along the pitch length: `0` = left goal line, `105` = right goal line |
+| y axis | across the pitch: `0` = far touchline, `68` = near touchline (camera side) |
+| Origin | `(0, 0)` = left far corner |
+| Units | metres (`x_m`, `y_m`) |
+
+"Left / right" and "far / near" are as seen from the camera. Both axes run
+in the same direction as the pixel axes of the video (x to the right, y
+towards the camera, which is down in the image), so image and pitch need no
+axis flip.
+
+The landmark pixels are clicked by hand, so every metric position derived
+from them is approximate.
+
+### Landmarks
+
+A landmark is a named point where a marked line meets or crosses another
+one, so the same point can be found both in the image and on the model.
+`field_config.yaml` lists 31 of them, each with `x_m` and `y_m`.
+
+Naming: `<object>_<side>`.
+
+| Part of the name | Meaning |
+|---|---|
+| `far` / `near` | on the side of the far / near touchline |
+| `left` / `right` | in the half of the left / right goal |
+| `_goal` | the point lies on the goal line |
+| `_in` | the point lies on the inner line of the box, inside the pitch |
+
+| Group | Landmarks |
+|---|---|
+| Pitch outline | `corner_left_far`, `corner_left_near`, `corner_right_far`, `corner_right_near` |
+| Halfway line | `halfway_far`, `halfway_near` (ends on the touchlines) |
+| Centre | `centre_spot`; `centre_circle_far`, `centre_circle_near` (circle meets the halfway line); `centre_circle_left`, `centre_circle_right` (circle points closest to each goal) |
+| Penalty areas | `left_pen_*`, `right_pen_*`: `far_goal`, `near_goal`, `far_in`, `near_in` |
+| Goal areas | `left_goalarea_*`, `right_goalarea_*`: the same four corners |
+| Goal posts | `left_post_far`, `left_post_near`, `right_post_far`, `right_post_near` (foot of the post on the goal line; optional) |
+
+The right side mirrors the left side (`x -> 105 - x`). Line dimensions used:
+penalty area 16.5 m deep and 40.32 m wide, goal area 5.5 m deep and 18.32 m
+wide, goal 7.32 m wide, centre circle radius 9.15 m.
+
+`centre_circle_left` and `centre_circle_right` are not line crossings: no
+marked line passes through them, so they are harder to click than the other
+landmarks.
+
+The clicked pixel position of each landmark is stored in
+`config/calibration_points.csv` (`name, x_m, y_m, px_x, px_y`; pixels of the
+original 4096 x 1080 frame). A landmark that could not be clicked has no row.

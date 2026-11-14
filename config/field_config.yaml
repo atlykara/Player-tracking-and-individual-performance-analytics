@@ -1,0 +1,78 @@
+# Pitch model and named landmarks used for calibration.
+# Every pitch measurement in the project comes from this file; no Python
+# module hard-codes a pitch dimension or a landmark position.
+
+pitch:
+  # Pitch size as given in the dataset metadata of match 118575
+  # (118575_tracker_box_metadata.xml: <pitch width="105" height="68"/>);
+  # this is also the FIFA standard size.
+  #
+  # Axis convention (fixed), all values in metres:
+  #   x: along the pitch length, 0 = left goal line, 105 = right goal line
+  #   y: across the pitch,       0 = far touchline,  68 = near touchline
+  #                                                       (camera side)
+  # Origin (0, 0) = left far corner. "left / right" and "far / near" are as
+  # seen from the camera, so x grows to the right and y grows towards the
+  # camera, the same directions as the pixel axes of the video.
+  length_m: 105
+  width_m: 68
+
+# Named reference points: where a marked line meets or crosses another one.
+# Naming: <object>_<side>, with
+#   far / near    side of the far / near touchline
+#   left / right  half of the left / right goal
+#   _goal         the point lies on the goal line
+#   _in           the point lies on the inner line of the box (inside the pitch)
+# Any landmark may be skipped during selection (not visible, hidden by a
+# player, unclear in the image); it then has no row in the points file.
+landmarks:
+  # Pitch outline and halfway line
+  corner_left_far:          {x_m: 0.0,   y_m: 0.0}
+  corner_left_near:         {x_m: 0.0,   y_m: 68.0}
+  corner_right_far:         {x_m: 105.0, y_m: 0.0}
+  corner_right_near:        {x_m: 105.0, y_m: 68.0}
+  halfway_far:              {x_m: 52.5,  y_m: 0.0}
+  halfway_near:             {x_m: 52.5,  y_m: 68.0}
+
+  # Centre spot and centre circle (radius 9.15 m)
+  centre_spot:              {x_m: 52.5,  y_m: 34.0}
+  centre_circle_far:        {x_m: 52.5,  y_m: 24.85}
+  centre_circle_near:       {x_m: 52.5,  y_m: 43.15}
+  centre_circle_left:       {x_m: 43.35, y_m: 34.0}
+  centre_circle_right:      {x_m: 61.65, y_m: 34.0}
+
+  # Left penalty area (16.5 m deep, 40.32 m wide)
+  left_pen_far_goal:        {x_m: 0.0,   y_m: 13.84}
+  left_pen_near_goal:       {x_m: 0.0,   y_m: 54.16}
+  left_pen_far_in:          {x_m: 16.5,  y_m: 13.84}
+  left_pen_near_in:         {x_m: 16.5,  y_m: 54.16}
+
+  # Left goal area (5.5 m deep, 18.32 m wide)
+  left_goalarea_far_goal:   {x_m: 0.0,   y_m: 24.84}
+  left_goalarea_near_goal:  {x_m: 0.0,   y_m: 43.16}
+  left_goalarea_far_in:     {x_m: 5.5,   y_m: 24.84}
+  left_goalarea_near_in:    {x_m: 5.5,   y_m: 43.16}
+
+  # Left goal posts (goal 7.32 m wide) - optional
+  left_post_far:            {x_m: 0.0,   y_m: 30.34}
+  left_post_near:           {x_m: 0.0,   y_m: 37.66}
+
+  # Right penalty area (mirror of the left side: x -> 105 - x)
+  right_pen_far_goal:       {x_m: 105.0, y_m: 13.84}
+  right_pen_near_goal:      {x_m: 105.0, y_m: 54.16}
+  right_pen_far_in:         {x_m: 88.5,  y_m: 13.84}
+  right_pen_near_in:        {x_m: 88.5,  y_m: 54.16}
+
+  # Right goal area
+  right_goalarea_far_goal:  {x_m: 105.0, y_m: 24.84}
+  right_goalarea_near_goal: {x_m: 105.0, y_m: 43.16}
+  right_goalarea_far_in:    {x_m: 99.5,  y_m: 24.84}
+  right_goalarea_near_in:   {x_m: 99.5,  y_m: 43.16}
+
+  # Right goal posts - optional
+  right_post_far:           {x_m: 105.0, y_m: 30.34}
+  right_post_near:          {x_m: 105.0, y_m: 37.66}
+
+# Clicked pixel positions of the landmarks (name, x_m, y_m, px_x, px_y),
+# written by "python src/calibrate.py select".
+points_file: config/calibration_points.csv
