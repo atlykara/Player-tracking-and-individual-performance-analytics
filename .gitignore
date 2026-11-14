@@ -42,3 +42,5 @@ __pycache__/
 !outputs/movement/
 outputs/movement/*/*
 !outputs/movement/*/consistency_report.md
+# Top view of the metric positions: one small figure, versioned.
+!outputs/movement/*/positions_pitch.png

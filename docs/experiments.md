@@ -782,3 +782,90 @@ a 1.05 x 0.68 m grid, and all of this is measured on one 2-minute clip.
 All positions and speeds remain approximate.
 
 Mapping the 66,000 foot points of the clip takes about 3 s.
+
+---
+
+## 2026-11-14 — Metric positions of the foot points
+
+**Goal:** give every row of the movement table its position on the pitch in
+metres. Positions only: metric speed and metric smoothing are a later step.
+
+### Command
+
+```
+python src/movement.py
+```
+
+### Method (`src/movement.py` v2)
+
+- Input: the raw foot points (`foot_x`, `foot_y`) of
+  `outputs/tracking/118575_gt/tracks.csv` (66,000 rows, 22 tracks).
+- `add_pitch_position()` maps them with `calibrate.pixel_to_pitch`, default
+  method from `config/field_config.yaml` (`reference_points`, 67 reference
+  points).
+- New columns in `outputs/movement/118575_gt/movement.csv`:
+
+| Column | Content |
+|---|---|
+| `x_m` | position along the pitch in metres, 0 = left goal line, 105 = right goal line |
+| `y_m` | position across the pitch in metres, 0 = far touchline, 68 = touchline on the camera side |
+| `on_pitch` | 1 if `-2 <= x_m <= 107` and `-2 <= y_m <= 70`, else 0 |
+
+- The 2 m margin of `on_pitch` allows for players who step over a line and
+  for the error of the mapping. Rows with `on_pitch = 0` are kept and only
+  flagged.
+- All earlier columns are unchanged: every line of the old `movement.csv` is
+  the unchanged start of the new line, and `consistency_report.md` is
+  byte-identical.
+
+### Summary numbers
+
+| Measure | Value |
+|---|---|
+| Rows / tracks | 66,000 / 22 |
+| `x_m` min / max | -4.14 / 103.69 m |
+| `y_m` min / max | -4.09 / 65.49 m |
+| Rows with `on_pitch = 0` | 202 (0.31 %) |
+| Rows outside the pitch lines (no margin) | 1,210 (1.83 %): 1,077 beyond the far touchline, 133 behind the left goal line |
+| Rows without a position | 0 |
+
+The 202 rows with `on_pitch = 0` belong to five tracks:
+
+- track 1, frames 2115-2211 (95 rows): 2.0 to 4.1 m behind the left goal
+  line at `y_m` 43-45. In the image the foot point is 35 to 85 px beyond the
+  goal line, so the player is behind the line there.
+- tracks 11, 13, 15 and 22 (107 rows): 2.0 to 4.1 m beyond the far touchline
+  between `x_m` 55 and 95. This is the area where the mapping is weakest, and
+  one pixel covers 0.5 to 0.7 m in depth there, so these rows cannot be told
+  apart from mapping error.
+
+### Figure
+
+![Foot point positions on the pitch](../outputs/movement/118575_gt/positions_pitch.png)
+
+`outputs/movement/118575_gt/positions_pitch.png`: all 66,000 positions on a
+top view of the pitch, camera side at the bottom, one colour per track (the
+same colours as in the box videos). The dashed frame is the `on_pitch`
+limit; rows outside it are marked with a white x.
+
+Observations:
+
+- The positions fill the pitch as expected: no track leaves the right goal
+  line or the near touchline, and the two goalkeepers stay in front of
+  their goals.
+- **Far from the camera the positions lie on visible rows.** The GT boxes
+  are whole pixels, and one pixel covers very different distances:
+
+| Place in the image | 1 px sideways | 1 px in depth |
+|---|---|---|
+| Near side, centre | 0.01 m | 0.03 m |
+| Centre circle | 0.04 m | 0.23 m |
+| Left penalty area | 0.09 m | 0.34 m |
+| Near the far touchline, centre | 0.05 m | 0.52 m |
+| Far right | 0.11 m | 0.70 m |
+
+  39 % of the rows (25,849) have `y_m` below 17 m, where a one-pixel change
+  of the box moves the position by about half a metre. This will show up as
+  noise in metric speed and has to be handled when speed is computed.
+- All positions are approximate (see "The calibration passes through the
+  reference points" above).

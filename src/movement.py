@@ -1,10 +1,14 @@
-"""Foot point movement in pixel space (v1).
+"""Foot point movement in pixel space, and the position on the pitch (v2).
 
 Reads a tracks.csv (here: the ground truth boxes with foot points) and adds,
 per track, the time stamp, the step to the previous row (dx, dy, dt) and the
-pixel speed. Units are pixels and pixels per second ONLY: the pixel-to-metre
-scale is not known before the homography stage, and one pixel covers a
-different distance near and far from the camera.
+pixel speed. The movement columns are in pixels and pixels per second ONLY:
+one pixel covers a different distance near and far from the camera.
+
+Since the calibration exists, every foot point is also mapped to the pitch:
+x_m, y_m in metres and the flag on_pitch. These are positions only; metric
+speed and metric smoothing are not computed here yet. The positions are
+approximate (see the calibration fit report).
 
 Movement uses foot_x, foot_y and not the box centre: the foot point is the
 point that will be mapped to the pitch, and the box centre also moves when
@@ -21,6 +25,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
+
+from calibrate import load_field_config, pitch_lines, pixel_to_pitch
+from draw_boxes_video import id_color
 
 # --- Settings -------------------------------------------------------------
 TRACKS_CSV = "outputs/tracking/118575_gt/tracks.csv"
@@ -39,6 +46,10 @@ SHORT_TRACK_SECONDS = 2.0   # tracks shorter than this are reported as short-liv
 SMOOTH_NEGLIGIBLE_PCT = 5   # median speed change below 5 %: smoothing is not needed
 STANDING_PX = 2             # net foot movement below 2 px in 1 s counts as standing
 PERCENTILES = [50, 90, 99, 99.5, 99.7, 99.9]
+# A position up to 2 m outside the lines still counts as on the pitch: players
+# do step over the lines, and the mapping itself is off by 1-2 m in places.
+PITCH_MARGIN_M = 2.0
+FIGURE_SURFACE, FIGURE_LINE, FIGURE_TEXT = "#1a1a19", "#c3c2b7", "#f0efec"   # dark: the track colours are bright
 
 
 def video_fps_and_duration(path):
@@ -51,8 +62,11 @@ def video_fps_and_duration(path):
     return fps, n_frames / fps
 
 
-def compute_movement(df, fps):
+def compute_movement(df, fps, window=SMOOTH_WINDOW):
     """Add timestamp, dx, dy, dt, pixel_speed, smoothed values and flags.
+
+    window is the smoothing window in frames (default SMOOTH_WINDOW); it is a
+    parameter so that other window lengths can be compared on the same input.
 
     Every value is computed inside one track (groupby track_id), so the first
     row of a track has empty dx, dy, dt and speeds, and smoothing never mixes
@@ -68,7 +82,7 @@ def compute_movement(df, fps):
 
     for col in ["x", "y"]:
         df[f"smooth_{col}"] = by_track[f"foot_{col}"].transform(
-            lambda s: s.rolling(SMOOTH_WINDOW, center=True, min_periods=1).mean())
+            lambda s: s.rolling(window, center=True, min_periods=1).mean())
     by_track = df.groupby("track_id")
     step = np.hypot(by_track["smooth_x"].diff(), by_track["smooth_y"].diff())
     df["smooth_speed"] = step / df["dt"]
@@ -76,6 +90,74 @@ def compute_movement(df, fps):
     df["gap_flag"] = df["dt"] > GAP_FRAMES / fps
     df["outlier_flag"] = df["pixel_speed"] > OUTLIER_SPEED_PX_S
     return df
+
+
+def add_pitch_position(df):
+    """Add x_m, y_m (metres on the pitch) and on_pitch to the movement table.
+
+    x_m runs along the pitch from the left goal line (0) to the right one;
+    y_m runs across it from the far touchline (0) to the touchline on the
+    camera side. The RAW foot point is mapped: smoothing in metres is a later
+    step, and the pixel columns stay as they are.
+
+    on_pitch = 1 if the position lies on the pitch or at most PITCH_MARGIN_M
+    outside it. Project rule: a row with on_pitch = 0 is kept and only flagged.
+    """
+    pitch = load_field_config()["pitch"]
+    metres = pixel_to_pitch(df[["foot_x", "foot_y"]].to_numpy())
+    df["x_m"], df["y_m"] = metres[:, 0], metres[:, 1]
+    inside = (df["x_m"].between(-PITCH_MARGIN_M, pitch["length_m"] + PITCH_MARGIN_M)
+              & df["y_m"].between(-PITCH_MARGIN_M, pitch["width_m"] + PITCH_MARGIN_M))
+    df["on_pitch"] = inside.astype(int)
+    return df
+
+
+def save_positions_figure(df, path):
+    """Top view of the pitch with every metric position, one colour per track.
+
+    The camera side is at the bottom, as in the video. A track has the same
+    colour as in the box videos (id_color). The dashed frame is the on_pitch
+    limit; positions outside it are marked with a white x.
+    """
+    import matplotlib
+    matplotlib.use("Agg")                   # writes the file, opens no window
+    import matplotlib.pyplot as plt
+
+    config = load_field_config()
+    length, width = float(config["pitch"]["length_m"]), float(config["pitch"]["width_m"])
+    _, markings = pitch_lines(config["landmarks"], length, width)
+    fig, ax = plt.subplots(figsize=(13, 9.4), facecolor=FIGURE_SURFACE)
+    ax.set_facecolor(FIGURE_SURFACE)
+    for line in markings:
+        ax.plot(line[:, 0], line[:, 1], color=FIGURE_LINE, linewidth=1.2)
+    m = PITCH_MARGIN_M
+    ax.plot([-m, length + m, length + m, -m, -m], [-m, -m, width + m, width + m, -m],
+            color=FIGURE_LINE, linewidth=0.8, linestyle="--")
+    for track_id, track in df.groupby("track_id"):
+        b, g, r = id_color(track_id)
+        ax.plot(track["x_m"], track["y_m"], ".", markersize=1.5, color=(r / 255, g / 255, b / 255),
+                label=str(track_id))
+    off = df[df["on_pitch"] == 0]
+    if len(off):
+        ax.plot(off["x_m"], off["y_m"], "x", markersize=5, color="white", label="on_pitch = 0")
+    ax.set_xlim(-6, length + 6)
+    ax.set_ylim(width + 6, -6)              # y downwards: far touchline at the top, camera at the bottom
+    ax.set_aspect("equal")
+    ax.set_xlabel("x_m (0 = left goal line)", color=FIGURE_TEXT)
+    ax.set_ylabel(f"y_m (0 = far touchline, {width:g} = camera side)", color=FIGURE_TEXT)
+    ax.tick_params(colors=FIGURE_TEXT)
+    for side in ax.spines.values():
+        side.set_color(FIGURE_SURFACE)
+    ax.set_title(f"Foot point positions on the pitch: {len(df)} positions, {df['track_id'].nunique()} tracks "
+                 f"(approximate; dashed = on_pitch limit, {PITCH_MARGIN_M:g} m outside the lines)",
+                 color=FIGURE_TEXT, fontsize=11, loc="left")
+    legend = ax.legend(title="track id", ncol=12, markerscale=8, loc="upper center", bbox_to_anchor=(0.5, -0.09),
+                       frameon=False, labelcolor=FIGURE_TEXT, fontsize=9)
+    legend.get_title().set_color(FIGURE_TEXT)
+    if len(off):
+        legend.legend_handles[-1].set_markersize(6)     # the x is already large enough
+    fig.savefig(path, dpi=130, facecolor=FIGURE_SURFACE, bbox_inches="tight")
+    plt.close(fig)
 
 
 def speed_percentiles(speed):
@@ -166,12 +248,14 @@ def write_consistency_report(df, out_md, fps, video_seconds):
 
 
 def main():
-    """Compute movement for TRACKS_CSV, write movement.csv and the report."""
+    """Compute movement for TRACKS_CSV, write movement.csv, the report and the pitch figure."""
     fps, video_seconds = video_fps_and_duration(VIDEO_PATH)
     df = compute_movement(pd.read_csv(TRACKS_CSV), fps)
+    df = add_pitch_position(df)
     out_dir = Path(OUT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_dir / "movement.csv", index=False, float_format="%.3f")
+    save_positions_figure(df, out_dir / "positions_pitch.png")
     checks = write_consistency_report(df, out_dir / "consistency_report.md", fps, video_seconds)
 
     print(f"Input            : {TRACKS_CSV} ({len(df)} rows, {df['track_id'].nunique()} tracks)")
@@ -181,6 +265,10 @@ def main():
     print(f"Flags            : gap {int(df['gap_flag'].sum())}, "
           f"outlier {int(df['outlier_flag'].sum())} (> {OUTLIER_SPEED_PX_S} px/s)")
     print(f"Checks passed    : {sum(checks.values())} / {len(checks)}")
+    off = int((df["on_pitch"] == 0).sum())
+    print(f"Pitch position   : x_m {df['x_m'].min():.2f} .. {df['x_m'].max():.2f} m, "
+          f"y_m {df['y_m'].min():.2f} .. {df['y_m'].max():.2f} m (approximate)")
+    print(f"on_pitch = 0     : {off} rows ({100 * off / len(df):.2f} %), more than {PITCH_MARGIN_M:g} m outside the lines")
     print(f"Outputs in       : {OUT_DIR}")
 
 
