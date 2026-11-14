@@ -1,4 +1,4 @@
-"""Foot point movement in pixel space, position and speed on the pitch (v3).
+"""Foot point movement in pixel space, position and speed on the pitch (v4).
 
 Reads a tracks.csv (here: the ground truth boxes with foot points) and adds,
 per track, the time stamp, the step to the previous row (dx, dy, dt) and the
@@ -265,7 +265,10 @@ def add_metric_speed(df, fps, smooth_frames, speed_window_s):
       speed_window_s (k is rounded down to whole frames). Near the ends of a
       piece the widest symmetric window that fits is used; with fewer than
       MIN_HALF_WINDOW frames on a side the speed is left empty.
-    - dist_m: length of the step from the previous smoothed position.
+    - dist_m: distance covered in the frame, speed_mps times the time since the
+      previous row. It is NOT the step between two smoothed positions: such
+      steps add up the jitter that is left in the positions, and their sum was
+      38 % above the reference distance, while speed times time is within 2 %.
     - speed_mps_raw: frame-to-frame speed of the unsmoothed positions, kept
       only to show what the smoothing does.
     - speed_flag: 1 if speed_mps > SPEED_FLAG_MPS. Flagged rows are kept.
@@ -285,7 +288,7 @@ def add_metric_speed(df, fps, smooth_frames, speed_window_s):
         speed[rows[ok]] = np.hypot(*(position[after] - position[before]).T) / (time[after] - time[before])
     df["speed_mps"], df["speed_kmh"] = speed, speed * 3.6
     by_piece = df.groupby(pieces)
-    df["dist_m"] = np.hypot(by_piece["x_m_smooth"].diff(), by_piece["y_m_smooth"].diff())
+    df["dist_m"] = df["speed_mps"] * by_piece["timestamp"].diff()
     df["speed_mps_raw"] = np.hypot(by_piece["x_m"].diff(), by_piece["y_m"].diff()) / by_piece["timestamp"].diff()
     df["speed_flag"] = (df["speed_mps"] > SPEED_FLAG_MPS).astype(int)
     return df
@@ -340,7 +343,7 @@ def choose_speed_parameters(df, fps, reference, out_md):
     lines = ["# Speed parameters against the reference", "",
              "All values are approximate. Our speed and the reference speed of the dataset are averaged in",
              f"1 s bins per track ({int(table['bins'].iloc[0])} bins). Bias = ours minus reference. Distance = per-track",
-             "sum of dist_m against the reference speed summed over the same frames. Peak = fastest moment",
+             "sum of dist_m (speed x time) against the reference speed summed over the same frames. Peak = fastest moment",
              f"of every track against the {SMOOTH_GRID[0]}-frame smoothing with the same speed window, mean over the tracks.", "",
              "| smooth_frames | speed_window_s (frames used) | MAE (m/s) | Bias (m/s) | Correlation | Ours p95 / p99 / max (m/s) "
              "| Distance difference (%) | Peak vs first (%) | Within the tie band |",
@@ -358,10 +361,8 @@ def choose_speed_parameters(df, fps, reference, out_md):
               f"**Chosen: smooth_frames = {smooth}, speed_window_s = {window:g}** (mean absolute error {best['mae']:.3f} m/s, "
               f"bias {best['bias']:+.3f} m/s, peak {best['peak_vs_first_pct']:+.1f} % against {SMOOTH_GRID[0]} frames). "
               f"Written to `{CONFIG_PATH}`.", "",
-              f"The rule looks at speed only. With the chosen smoothing the summed dist_m is {best['dist_diff_pct']:.1f} % away "
-              f"from the reference distance; the smallest difference in the table is {table['dist_diff_pct'].min():.1f} % "
-              f"(smooth_frames = {int(table.loc[table['dist_diff_pct'].idxmin(), 'smooth_frames'])}). A step from frame to frame "
-              "adds up the remaining jitter of the positions, so short smoothing makes the summed distance too long."]
+              f"The rule looks at speed only. With the chosen pair the summed dist_m is {best['dist_diff_pct']:.1f} % away from "
+              f"the reference distance; the smallest difference in the table is {table['dist_diff_pct'].min():.1f} %."]
     Path(out_md).write_text("\n".join(lines) + "\n", encoding="utf-8")
     return smooth, window, table
 
@@ -568,7 +569,7 @@ def main():
     print(f"speed_flag = 1   : {flagged} rows ({100 * flagged / len(df):.2f} %), above {SPEED_FLAG_MPS:g} m/s; "
           f"rows without a speed: {int(df['speed_mps'].isna().sum())}")
     print(f"Distance         : {summary['distance_m'].min():.0f} .. {summary['distance_m'].max():.0f} m per track, "
-          f"mean {summary['distance_m'].mean():.0f} m (sum of dist_m)")
+          f"mean {summary['distance_m'].mean():.0f} m (sum of dist_m = speed x time)")
     print(f"Against reference: speed error {scores['mae']:.3f} m/s, bias {scores['bias']:+.3f} m/s, correlation "
           f"{scores['corr']:.3f}, distance difference {scores['dist_diff_pct']:.1f} % "
           f"(track -> player votes: lowest share {100 * id_map['vote_share'].min():.1f} %)")

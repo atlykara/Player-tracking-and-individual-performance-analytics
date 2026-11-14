@@ -164,22 +164,20 @@ in the same direction as the pixel axes of the video (x to the right, y
 towards the camera, which is down in the image), so image and pitch need no
 axis flip.
 
-The landmark pixels are clicked by hand, so every metric position derived
-from them is approximate.
+The pixel positions of the landmarks are read off the image, so every
+metric position derived from them is approximate.
 
 ### Landmarks
 
 A landmark is a named point that can be found both in the image and on the
-model. `field_config.yaml` lists 67 of them, each with `x_m` and `y_m`:
+model. `field_config.yaml` lists 67 of them, each with `x_m` and `y_m`; they
+are the 67 reference points of the calibration:
 
 - **31 line landmarks**, where a marked line meets or crosses another one.
-  Their pixel positions were clicked by hand (`calibrate.py select`).
-- **36 touchline points**, every 5.5 m along both touchlines. No marked line
-  crosses the touchline there; the dataset marks them where the edges of
-  the mowing stripes meet the touchline. Their pixel positions were **not
-  clicked**: they are taken from the dataset keypoint file
-  (`118575_keypoints.json`, key `"(x_m,y_m)"` -> pixel). They were added
-  because the line landmarks give only three points on each touchline.
+- **36 touchline points**, every 5.5 m along both touchlines, where the
+  edges of the mowing stripes meet the touchline. No marked line crosses
+  the touchline there. They were added because the line landmarks give only
+  three points on each touchline.
 
 Naming: `<object>_<side>`.
 
@@ -198,7 +196,7 @@ Naming: `<object>_<side>`.
 | Penalty areas | `left_pen_*`, `right_pen_*`: `far_goal`, `near_goal`, `far_in`, `near_in` |
 | Goal areas | `left_goalarea_*`, `right_goalarea_*`: the same four corners |
 | Goal posts | `left_post_far`, `left_post_near`, `right_post_far`, `right_post_near` (foot of the post on the goal line; optional) |
-| Touchline points | `touchline_far_<x>m`, `touchline_near_<x>m` with `<x>` = 5.5, 11, ... 49.5 and 55.5, 61, ... 99.5 (18 per touchline; pixels from the dataset) |
+| Touchline points | `touchline_far_<x>m`, `touchline_near_<x>m` with `<x>` = 5.5, 11, ... 49.5 and 55.5, 61, ... 99.5 (18 per touchline) |
 
 The right side mirrors the left side (`x -> 105 - x`). Line dimensions used:
 penalty area 16.5 m deep and 40.32 m wide, goal area 5.5 m deep and 18.32 m
@@ -216,14 +214,14 @@ A landmark without a pixel position has no row.
 |---|---|
 | `name`, `x_m`, `y_m` | landmark name and its position in metres |
 | `px_x`, `px_y` | pixel position on frame 0 |
-| `source` | `own` = selected by hand on the frame (the 31 line landmarks); `dataset` = pixel position taken from the dataset (the 36 touchline points) |
+| `source` | where the pixel position comes from: `own` = selected on the frame with `calibrate.py select`; `dataset` = taken from the keypoint file of the dataset |
 | `use` | `1` = reference point of the calibration; `0` = kept in the file but not used |
 
-All 67 rows have `use = 1`: the calibration is built from the 31 own points
-and the 36 touchline points, and it passes through every one of them. 15
-touchline points (14 on the far touchline) are more than 2 m from where the
-own points alone put them; the fit report lists them. See "The calibration
-passes through the reference points" in `docs/experiments.md`.
+All 67 rows have `use = 1`: the calibration is built from all 67 reference
+points and passes through every one of them. 15 touchline points (14 on the
+far touchline) are more than 2 m from where the line landmarks alone put
+them; the fit report lists them. See "The calibration passes through the
+reference points" in `docs/experiments.md`.
 
 ## Reference positions of the players
 

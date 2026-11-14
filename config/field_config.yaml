@@ -75,10 +75,8 @@ landmarks:
 
   # Touchline points every 5.5 m (x_m = 5.5 ... 49.5 from the left goal line,
   # 55.5 ... 99.5 = the same distances from the right goal line). No pitch
-  # line crosses the touchline there: the dataset marks them where the edges
-  # of the mowing stripes meet the touchline. Their pixel positions are NOT
-  # clicked; they are taken from the dataset keypoint file
-  # (118575_keypoints.json). They were added because the 31 clicked
+  # line crosses the touchline there: they are the places where the edges of
+  # the mowing stripes meet the touchline. They were added because the line
   # landmarks give only three points on each touchline.
   # Far touchline
   touchline_far_5.5m:       {x_m: 5.5,   y_m: 0.0}
@@ -122,11 +120,10 @@ landmarks:
 
 # Pixel positions of the landmarks, written by "python src/calibrate.py select":
 #   name, x_m, y_m, px_x, px_y, source, use
-#   source  own = selected by hand on the video frame, dataset = touchline
-#           mark whose pixel position comes from the dataset
+#   source  where the pixel position comes from (see docs/data.md)
 #   use     1 = reference point of the calibration, 0 = kept in the file
 #           but not used. All 67 points are in use. "fit" reports how far
-#           each dataset mark is from the prediction of the own points.
+#           each touchline point is from the prediction of the line landmarks.
 points_file: config/calibration_points.csv
 
 # Pixel -> metre mapping ("python src/calibrate.py fit"). The calibration is

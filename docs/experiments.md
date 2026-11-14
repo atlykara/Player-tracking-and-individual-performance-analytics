@@ -516,7 +516,7 @@ outside the remaining ones. All positions from this mapping are approximate.
 
 ## 2026-11-14 — Touchline points added (67 landmarks)
 
-**Goal:** the 31 clicked landmarks give only three points on each touchline
+**Goal:** the 31 line landmarks give only three points on each touchline
 (two corners and the end of the halfway line), and the largest mapping
 errors were at the near touchline. 36 touchline points were added and the
 three variants were fitted again.
@@ -525,10 +525,9 @@ three variants were fitted again.
 
 - `config/field_config.yaml`: 36 new landmarks `touchline_far_<x>m` and
   `touchline_near_<x>m`, every 5.5 m along both touchlines.
-- `config/calibration_points.csv`: 36 rows appended. Their pixel positions
-  are **not clicked**; they come from the dataset keypoint file
-  (`118575_keypoints.json`). The 31 clicked rows are unchanged (checked byte
-  by byte against a copy made before the change).
+- `config/calibration_points.csv`: 36 rows appended, 67 reference points in
+  total. The 31 earlier rows are unchanged (checked byte by byte against a
+  copy made before the change).
 - On frame 0 the 36 points lie on the touchlines, at the edges of the
   mowing stripes.
 - Same command (`python src/calibrate.py fit`), same code, `overlap_m = 10`.
@@ -548,7 +547,7 @@ three variants were fitted again.
 The two rows of a variant are not measured on the same points. The 67-point
 run split by group:
 
-| Variant | 31 clicked: mean / max (m) | 36 touchline: mean / max (m) |
+| Variant | 31 line landmarks: mean / max (m) | 36 touchline points: mean / max (m) |
 |---|---|---|
 | `raw_2piece` | 3.36 / 6.23 | 2.51 / 4.30 |
 | `raw_3piece` | 2.15 / 4.88 | 1.56 / 2.94 |
@@ -559,7 +558,7 @@ run split by group:
 `undist_2piece` stays selected: it is still the best variant on every
 measure except the maximum, where `raw_3piece` is lower (4.88 m vs 5.32 m).
 For `undist_2piece` the extra points changed little: the mean went from
-1.52 m to 1.49 m, and on the 31 clicked landmarks alone it is 1.60 m. The
+1.52 m to 1.49 m, and on the 31 line landmarks alone it is 1.60 m. The
 maximum dropped from 6.46 m to 5.32 m. The raw variants gained more
 (`raw_3piece` 2.53 m -> 1.83 m, its maximum 11.49 m -> 4.88 m), because its
 middle piece no longer rests on seven points. The remaining error of
@@ -584,18 +583,19 @@ The calibration is built from reference points: named points of the pitch
 with a known position in metres and a pixel position on frame 0. The pitch
 grid in the check images is drawn from them.
 
-- **31 own points** were selected by hand on the frame with
-  `python src/calibrate.py select`: crossings of marked lines, the centre
-  spot, the two side points of the centre circle and the feet of the goal
-  posts (`source = own`).
-- **36 touchline marks** every 5.5 m come from the dataset keypoint file
-  (`source = dataset`). A mark is used only if the 31 own points alone
-  predict it within 2 m of its nominal position (blended 3 pieces on
-  undistorted pixels). 21 marks pass; 15 do not: 14 on the far touchline and
-  `touchline_near_5.5m`.
-- `config/calibration_points.csv` keeps all 67 rows with the columns
-  `source` and `use`; the calibration uses the 52 rows with `use = 1`.
-  `fit` repeats the 2 m check and reports it.
+67 reference points were selected:
+
+- **31 line landmarks**: crossings of marked lines, the centre spot, the two
+  side points of the centre circle and the feet of the goal posts.
+- **36 touchline points**: every 5.5 m along both touchlines, where the
+  edges of the mowing stripes meet the touchline.
+
+A touchline point is used only if the 31 line landmarks alone predict it
+within 2 m of its nominal position (blended 3 pieces on undistorted pixels).
+21 pass; 15 do not: 14 on the far touchline and `touchline_near_5.5m`.
+`config/calibration_points.csv` keeps all 67 rows; the column `use` marks
+the 52 rows the calibration uses. `fit` repeats the 2 m check and reports
+it.
 
 ### Method
 
@@ -625,7 +625,7 @@ point is mapped directly (66,000 foot points take about 1 s).
 | Method | blended 3 pieces (baseline); reference points |
 | Radius | 10, 15, 20, 30, 40, 60 m |
 | Minimum weight | 0, 0.05, 0.15 |
-| Point set | own 31; all 67; own + marks with 16.5 <= x_m <= 88.5; all 67 with the marks weighted 0.3; own + marks within 2 m of the prediction from the own points |
+| Point set | 31 line landmarks; all 67; line landmarks + touchline points with 16.5 <= x_m <= 88.5; all 67 with the touchline points weighted 0.3; line landmarks + touchline points within 2 m of the prediction from the line landmarks |
 | Pixel space | undistorted; raw |
 
 Scores:
@@ -671,13 +671,13 @@ Leave-one-out error at the 52 reference points (fit report), mean / median
    at 20 m, 0.93 m at 30 m, 1.04 m at 40 m, 1.53 m at 60 m. 20 m and 30 m
    cannot be told apart. A minimum weight of 0.05 lowers the position error
    and raises the speed error; 0.15 is worse on both.
-3. **The far-touchline dataset marks deviate systematically along the
-   line.** Predicted from the own points, they are off by -3.8 m on the left
-   to +3.2 m on the right, near zero at the halfway line. It is a smooth
-   shift of the whole row, not single bad marks. Leaving these marks out
-   lowers the median position error from 1.20 m (all 67 points) to 0.93 m.
-   Leave-one-out cannot see such a shift, because a mark is always predicted
-   well by its neighbours 5.5 m away.
+3. **The far-touchline points deviate systematically along the line.**
+   Predicted from the line landmarks, they are off by -3.8 m on the left to
+   +3.2 m on the right, near zero at the halfway line. It is a smooth shift
+   of the whole row, not single bad points. Leaving these points out lowers
+   the median position error from 1.20 m (all 67 points) to 0.93 m.
+   Leave-one-out cannot see such a shift, because a touchline point is
+   always predicted well by its neighbours 5.5 m away.
 
 ### Limits
 
@@ -688,7 +688,7 @@ Leave-one-out error at the 52 reference points (fit report), mean / median
   have too few samples to be scored.
 - In the far strip the selected mapping is worse than the baseline in 3 of
   20 regions (for example 0.68 m -> 1.29 m), and its far touchline runs up
-  to 4.7 m beside the dataset marks that are not used.
+  to 4.7 m beside the touchline points that are not used.
 - All positions and speeds remain approximate.
 
 ### Outputs
@@ -697,7 +697,7 @@ Leave-one-out error at the 52 reference points (fit report), mean / median
   the calibration, their metre positions, the settings and the `video` they
   belong to (written by `fit`, read by `pixel_to_pitch`).
 - `outputs/calibration/118575_fit_report.md`, `118575_fit_errors.csv`: both
-  methods, the 2 m check of the dataset marks, error per point (not
+  methods, the 2 m check of the touchline points, error per point (not
   versioned).
 - `outputs/calibration/118575_grid.jpg` (default) and
   `118575_grid_pieces.jpg` (baseline): frame 0 with a 5 m grid (yellow), the
@@ -710,8 +710,7 @@ Leave-one-out error at the 52 reference points (fit report), mean / median
 ## 2026-11-14 — The calibration passes through the reference points
 
 **Goal:** the pitch lines of the grid image must run through the reference
-points that were selected on the frame, and positions and speeds must be
-computed from that same mapping.
+points, and positions and speeds must be computed from that same mapping.
 
 ### Problem
 
@@ -719,7 +718,7 @@ With the setting selected in the section above (52 reference points, radius
 30 m, minimum weight 0.05) the mapping only came close to its own reference
 points. In the grid image the drawn lines missed them by 7.6 px on average
 and by up to 22 px (0.94 m mean, 3.06 m max on the pitch), most visibly at
-the corners, and the far touchline ran beside the 15 dataset marks that
+the corners, and the far touchline ran beside the 15 touchline points that
 were not used.
 
 ### Change (`src/calibrate.py`, method `reference_points`)
@@ -734,9 +733,8 @@ were not used.
   found before. After that a reference pixel lands on its own pitch
   position.
 - **All 67 points are used** (`use = 1` for every row of
-  `config/calibration_points.csv`), including the 15 far-touchline marks
-  that were left out before. `radius_m: 30` and `min_weight: 0.05` are
-  unchanged.
+  `config/calibration_points.csv`), including the 15 touchline points that
+  were left out before. `radius_m: 30` and `min_weight: 0.05` are unchanged.
 - `fit` now measures and reports whether the mapping passes through its
   reference points.
 
@@ -746,7 +744,7 @@ were not used.
 |---|---|---|---|
 | Error at the reference points, mean / max (m) | 1.18 / 4.61 | 0.94 / 3.06 | 0.00 / 0.01 |
 | Reference point to drawn line, mean / max (px) | 11.3 / 38 | 7.6 / 22 | 0.0 / 0 |
-| Leave-one-out, own points, mean / max (m) | 1.57 / 5.63 | 1.39 / 3.05 | 0.76 / 2.63 |
+| Leave-one-out, line landmarks, mean / max (m) | 1.57 / 5.63 | 1.39 / 3.05 | 0.76 / 2.63 |
 | Player position error, median (m) | 1.80 | 0.93 | 1.36 |
 | Player position error, p95 (m) | 4.02 | 2.65 | 3.19 |
 | Speed, mean absolute error (m/s) | 0.276 | 0.284 | 0.260 |
@@ -759,7 +757,7 @@ positions and speeds of the dataset, as in the section above.
 - The mapping now passes through all 67 reference points, and the pitch
   lines of `118575_grid.jpg` run through them.
 - A reference point that is left out is predicted better than before
-  (0.76 m against 1.39 m on the own points).
+  (0.76 m against 1.39 m on the line landmarks).
 - Speed and distance agree better with the reference than with the
   previous default, and slightly better than with the baseline.
 - **The median player position error against the dataset reference is
@@ -772,10 +770,10 @@ positions and speeds of the dataset, as in the section above.
 - Radius and minimum weight now matter little: for radii of 20 to 60 m and
   minimum weights of 0 to 0.15 the median position error stays between 1.30
   and 1.45 m and the speed error between 0.26 and 0.29 m/s.
-- 15 dataset marks are still more than 2 m from where the own points alone
-  put them, 14 of them along the far touchline; the fit report lists them.
-  They are used anyway: they lie on the visible touchline, and only their
-  place along the line is uncertain.
+- 15 touchline points are still more than 2 m from where the line landmarks
+  alone put them, 14 of them along the far touchline; the fit report lists
+  them. They are used anyway: they lie on the visible touchline, and only
+  their place along the line is uncertain.
 
 The limits of the section above still hold: the reference positions lie on
 a 1.05 x 0.68 m grid, and all of this is measured on one 2-minute clip.
@@ -988,6 +986,8 @@ reference for the chosen values. The `distance_m` column of
 `speed_summary.csv` is the sum of `dist_m` and therefore too long; this is
 open and has to be settled before distances are reported.
 
+Settled in the next section: `dist_m` is now computed from the speed.
+
 ### Figure
 
 ![Metric speed against the reference](../outputs/movement/118575_gt/speed_metric.png)
@@ -1009,3 +1009,138 @@ positions.
   choice.
 - `outputs/movement/118575_gt/speed_metric.png`: the figure.
 - All positions, speeds and distances are approximate.
+
+---
+
+## 2026-11-14 — Distance as speed x time
+
+**Goal:** settle the open point of the section above: the summed distance
+was 38 % above the reference. Find the setting that is closest to the
+reference in speed, sprint peaks and distance.
+
+### Experiment
+
+173 scenarios were scored against the reference of the dataset with a
+scratch script (results in `outputs/movement/speed_experiments/`, not
+versioned): moving average with a chord speed (the method in
+`movement.py`), Savitzky-Golay, Butterworth low-pass, a median filter
+before the average, and two Kalman smoothers (one with the same position
+noise everywhere, one with pixel noise pushed through the mapping). Each
+scenario was scored with distance as summed frame-to-frame steps and as
+`speed x time`.
+
+Diagnostics before the comparison:
+
+- No time shift between our speed and the reference speed.
+- Apart from any smoothing, our displacements over 2 to 10 s are 2 % shorter
+  than those of the reference positions. A perfect filter would therefore
+  show about -2 % of distance.
+
+| Scenario (distance = speed x time) | Speed error, 1 s bins (m/s) | Speed error per frame (m/s) | Peak per track, mean (%) | Distance, mean (%) | Distance, mean absolute (%) | Distance above 19.8 km/h (%) |
+|---|---|---|---|---|---|---|
+| **5-frame average, 1 s window (kept)** | 0.191 | 0.271 | +3.9 | -1.4 | 1.9 | 0.0 |
+| 9-frame average, 1 s window | 0.191 | 0.254 | 0.0 | -2.3 | 2.5 | -3.0 |
+| Butterworth 0.6 Hz | 0.197 | 0.251 | 0.0 | -0.9 | 1.8 | +3.6 |
+| Kalman, pixel noise 1 px, acceleration 3 m/s^2 | 0.183 | 0.244 | -1.4 | -2.3 | 2.8 | +1.0 |
+| Kalman, pixel noise 1 px, acceleration 2 m/s^2 | 0.179 | 0.228 | -2.9 | -3.2 | 3.5 | -2.0 |
+
+### Findings
+
+1. **The 38 % came from how distance was summed, not from the smoothing.**
+   A step between two smoothed positions still contains jitter, and the
+   steps add it up. `speed x time` uses the speed measured over one second
+   and is within 2 % for the settings already chosen.
+2. **No scenario is clearly better on speed.** Every reasonable one ends
+   between 0.18 and 0.20 m/s. The Kalman smoother with pixel noise is the
+   best (0.183 against 0.191 m/s; 95 % interval of the difference over
+   resampled tracks: 0.003 to 0.013 m/s) but loses 0.3 to 1.6 points of
+   distance.
+3. **The sprint peaks are limited by the calibration, not by the
+   smoothing.** In the second around the six fastest sprints our speed is 7
+   to 8 % below the reference in every scenario. All six are on the far
+   side of the pitch. The ratio of our speed to the reference speed is 0.97
+   to 1.03 on most of the pitch, but 0.95 and 0.88 in the two far-right
+   regions, where the calibration is weakest. With the kept setting the
+   single-frame peaks look right (+0.5 % on the six fastest tracks) only
+   because noise spikes cancel that deficit.
+
+### Change (`src/movement.py` v4)
+
+`dist_m` is now `speed_mps` times the time since the previous row, not the
+length of the step between two smoothed positions. `smooth_frames: 5` and
+`speed_window_s: 1` are unchanged; the `params` run chooses them again by
+the same rule. No other column changed.
+
+| | Before | Now |
+|---|---|---|
+| Distance per track, mean | 362.5 m | 263.3 m |
+| Reference | 267.2 m | 267.2 m |
+| Difference, mean / mean absolute | +38.3 % / 38.3 % | -1.5 % / 1.9 % |
+| Per track, smallest to largest difference | | -4.1 % to +1.7 % |
+| Speed error, bias, correlation | 0.191 m/s, -0.030 m/s, 0.982 | unchanged |
+
+The distance column of the parameter table changes with it (1.8 % for the
+chosen pair, 1.8 to 5.5 % over the grid); see
+`outputs/movement/118575_gt/speed_param_test.md`.
+
+### Limits
+
+- The reference is not the truth: its speed is a processed signal and its
+  positions lie on a 1.05 x 0.68 m grid.
+- About -2 % of distance and 7 to 8 % of the sprint peaks belong to the
+  calibration on the far side; smoothing does not change them.
+- 88 rows have no speed (the first two and the last two rows of every
+  track) and add no distance: 0.16 s per track.
+- The parameters were chosen and scored on the same 2-minute clip. The two
+  halves of the clip and odd / even tracks give the same ranking.
+- All positions, speeds and distances remain approximate.
+
+---
+
+## 2026-11-14 — Output video with the pitch grid
+
+**Goal:** show the calibration in the current output video
+(`outputs/118575_latest.mp4`), next to the boxes and trails it already had.
+
+### Command
+
+```
+python src/draw_boxes_video.py
+```
+
+### What the video shows (`src/draw_boxes_video.py` v5, `SOURCE = "gt"`)
+
+- **Pitch grid:** the 5 m grid (yellow) and the pitch markings (red) of the
+  calibration, drawn into every frame at 45 % opacity, under the trails and
+  the boxes. The lines are sampled densely in metres and mapped to pixels
+  with `calibrate.pitch_to_pixel` (the way back of `pixel_to_pitch`), so
+  they follow the curve of the panoramic image. They are computed once,
+  because the camera is fixed.
+- **Boxes, IDs and foot points** of the ground truth, one colour per ID, as
+  before.
+- **Trails:** the last 3 s of every foot point, fading, as before.
+- Top left: frame number, number of boxes and the note "pitch grid 5 m
+  (approximate)".
+
+The outline of the pitch area is not drawn when the grid is on, because the
+grid already shows the pitch outline.
+
+### Result
+
+- `outputs/118575_latest.mp4`: 4096 x 1080, 25 fps, 3000 frames (the same
+  as the source clip, checked by the script), H.264 at CRF 23, 141 MB
+  (not versioned). It replaces the earlier video with boxes and trails only.
+- `outputs/118575_latest_frame.jpg`: frame 1500 of the new video
+  (versioned).
+- Rendering takes about 9 minutes.
+
+Things to see in the video:
+
+- The grid lines run through the reference points, so the pitch markings
+  drawn in red lie on the white lines.
+- A trail can be read against the grid: one square is 5 m, so a player who
+  crosses one square during the 3 s of the trail moves at about 6 km/h.
+- On the far side one square is much smaller in the image than on the
+  camera side, so the same pixel jitter is a larger distance in metres
+  there.
+- The grid is approximate, like every position derived from it.

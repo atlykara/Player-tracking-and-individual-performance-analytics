@@ -1,4 +1,4 @@
-"""Draw tracked boxes, foot points and trails on the clip (v4).
+"""Draw tracked boxes, foot points, trails and the pitch grid on the clip (v5).
 
 v1 drew only the ground truth. v2 made the drawing generic: any table with
 the columns `frame, track_id, x, y, w, h` (pixels, top-left origin, frame
@@ -7,7 +7,9 @@ the columns `frame, track_id, x, y, w, h` (pixels, top-left origin, frame
 point (a small filled dot, the point that later goes to the pitch) and
 chooses the table with one constant, SOURCE. v4 draws the last few seconds
 of every foot point as a fading trail, read from movement.py's output, so
-movement and its jitter can be seen in the video.
+movement and its jitter can be seen in the video. v5 draws the 5 m pitch grid
+and the pitch markings of the calibration into every frame, under the trails
+and the boxes. The grid is computed once, because the camera does not move.
 
 Every ID keeps one colour for the whole video and shows its number above
 the box, so a viewer can follow one player. The GT is read with
@@ -24,6 +26,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
+from calibrate import load_field_config, pitch_lines, pitch_to_pixel
 from evaluate_tracking import load_ground_truth
 from select_roi import load_roi
 from track import add_foot_columns
@@ -56,6 +59,11 @@ MOVEMENT_PATHS = {"gt": "outputs/movement/118575_gt/movement.csv"}
 TRAIL_SECONDS = 3.0              # length of the trail behind each player
 USE_SMOOTH = True                # smooth_x/smooth_y (True) or raw foot_x/foot_y
 TRAIL_FADE_STEPS = 4             # opacity levels; each costs one blend of the frame
+# Pitch grid of the last calibration fit (config/homography.npz).
+DRAW_GRID = True                 # 5 m grid and pitch markings
+GRID_COLOR = (0, 255, 255)       # BGR yellow
+MARKING_COLOR = (0, 0, 255)      # BGR red
+GRID_OPACITY = 0.45              # the players stay visible through the lines
 
 
 def id_color(track_id):
@@ -84,6 +92,30 @@ def draw_frame(img, rows, frame, title):
     n_valid = int(rows["is_valid"].sum())
     cv2.putText(img, f"{title}  frame {frame}  boxes {n_valid}", (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
+
+
+def load_grid():
+    """Pitch grid and markings as pixel polylines, or None if DRAW_GRID is off.
+
+    The lines are sampled densely in metres and mapped to pixels with the
+    calibration, so they follow the curve of the panoramic image.
+    """
+    if not DRAW_GRID:
+        return None
+    pitch = load_field_config()
+    length, width = float(pitch["pitch"]["length_m"]), float(pitch["pitch"]["width_m"])
+    grid, marks = pitch_lines(pitch["landmarks"], length, width)
+    to_pixels = lambda lines: [np.round(pitch_to_pixel(line)).astype(np.int32).reshape(-1, 1, 2) for line in lines]
+    print(f"Grid             : {len(grid)} grid lines, {len(marks)} markings from the calibration")
+    return {"grid": to_pixels(grid), "marks": to_pixels(marks)}
+
+
+def draw_grid(img, grid):
+    """Blend the grid (thin, yellow) and the pitch markings (red) into the frame."""
+    overlay = img.copy()
+    cv2.polylines(overlay, grid["grid"], False, GRID_COLOR, 1, cv2.LINE_AA)
+    cv2.polylines(overlay, grid["marks"], False, MARKING_COLOR, 2, cv2.LINE_AA)
+    cv2.addWeighted(overlay, GRID_OPACITY, img, 1 - GRID_OPACITY, 0, dst=img)
 
 
 def load_trails(source):
@@ -132,7 +164,7 @@ def video_info(path):
 
 
 def write_video(boxes, video_path, output_path, title, roi=None, frame_image_path=None,
-                trails=None):
+                trails=None, grid=None):
     """Read the clip frame by frame, draw the boxes and write an mp4 of the same size/fps.
 
     `boxes` needs the columns frame, track_id, x, y, w, h, foot_x, foot_y. An
@@ -140,7 +172,8 @@ def write_video(boxes, video_path, output_path, title, roi=None, frame_image_pat
     tables without it, like tracks.csv, are treated as all valid. `roi` (N x 2
     pixel polygon) is drawn as a thin outline when given. If
     `frame_image_path` is given, the middle frame is also saved as an image.
-    `trails` (from load_trails) are drawn under the boxes.
+    `trails` (from load_trails) are drawn under the boxes, `grid` (from
+    load_grid) under everything.
     """
     if "is_valid" not in boxes.columns:
         boxes = boxes.assign(is_valid=True)
@@ -156,11 +189,16 @@ def write_video(boxes, video_path, output_path, title, roi=None, frame_image_pat
         ok, img = cap.read()
         if not ok:
             break
+        if grid:
+            draw_grid(img, grid)
         if trails:
             draw_trails(img, trails, frame, fps)
         draw_frame(img, by_frame.get(frame, empty), frame, title)
-        if roi is not None:
+        if roi is not None and not grid:      # the grid already shows the pitch outline
             cv2.polylines(img, [roi], True, ROI_COLOR, 1, cv2.LINE_AA)
+        if grid:
+            cv2.putText(img, "pitch grid 5 m (approximate)", (20, 92),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
         if frame_image_path and frame == n_frames // 2:
             cv2.imwrite(str(frame_image_path), img)
             print(f"Middle frame     : {frame_image_path}")
@@ -192,12 +230,12 @@ def check_same_format(source_path, output_path):
 
 
 def draw_boxes(boxes, output_path, title, video_path=VIDEO_PATH, roi=None, frame_image_path=None,
-               trails=None):
+               trails=None, grid=None):
     """Draw one box table on the clip, compress and check the result."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     print(f"{title:<17}: {len(boxes)} boxes, {boxes['track_id'].nunique()} IDs")
-    write_video(boxes, video_path, output, title, roi, frame_image_path, trails)
+    write_video(boxes, video_path, output, title, roi, frame_image_path, trails, grid)
     compress_with_ffmpeg(output)
     check_same_format(video_path, output)
     print(f"Saved to         : {output}")
@@ -215,7 +253,7 @@ def main(source=SOURCE):
         boxes = add_foot_columns(boxes)
     roi = load_roi(ROI_PATH) if DRAW_ROI_OUTLINE else None
     draw_boxes(boxes, OUTPUT_PATHS[source], source, roi=roi, frame_image_path=frame_image,
-               trails=load_trails(source))
+               trails=load_trails(source), grid=load_grid())
 
 
 if __name__ == "__main__":

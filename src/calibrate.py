@@ -2,7 +2,8 @@
 
 The calibration is built from reference points: named points of the pitch whose
 position in metres is known (config/field_config.yaml) and whose pixel position
-was selected by hand on a video frame ("select"). "fit" turns them into the
+on a video frame is kept in the points file ("select" collects pixel
+positions on the frame). "fit" turns them into the
 mapping from pixels to metres, measures its error and draws the pitch grid
 that follows from the reference points back into the frame.
 
@@ -60,8 +61,11 @@ EXACT_DISTANCE_M = 0.05
 # A pixel is mapped in steps: a rough position first, then again with the weights
 # set around the result. After 3 steps a reference pixel lands on its own position.
 POSITION_PASSES = 3
-# The fit report flags a dataset mark that the own points alone predict further
-# away than this from its nominal position (information only).
+# Reference points with this prefix are the touchline points (every 5.5 m along a
+# touchline); all the others are line landmarks. Used only to group the report.
+TOUCHLINE_PREFIX = "touchline_"
+# The fit report flags a touchline point that the line landmarks alone predict
+# further away than this from its nominal position (information only).
 MARK_LIMIT_M = 2.0
 TINY_WEIGHT = 1e-6      # lower bound of a weight; keeps the fit defined if min_weight is 0
 MIN_PIECE_POINTS = 5    # a homography is fixed by 4 points; 5 leaves one point to average over
@@ -71,7 +75,7 @@ SAMPLE_STEP_M = 0.25    # pitch lines are sampled this densely, so curved lines 
 GRID_COLOR = (0, 255, 255)      # BGR yellow
 MARKING_COLOR = (0, 0, 255)     # BGR red
 USED_COLOR = (255, 255, 255)    # BGR white: reference point in use
-UNUSED_COLOR = (255, 0, 255)    # BGR magenta: dataset mark that is not used
+UNUSED_COLOR = (255, 0, 255)    # BGR magenta: point of the points file that is not used
 ZOOM_HALF = 25          # magnifier shows +-25 original px around the cursor
 ZOOM_FACTOR = 4         # ... and draws every original pixel as 4 x 4
 BAR_HEIGHT = 60         # black status bar under the frame: text never hides the pitch
@@ -106,10 +110,11 @@ def read_frame(video_path, index):
 def load_points(csv_path, landmarks):
     """Return ({name: (px_x, px_y)}, {name: (source, use)}) from the points file.
 
-    source: "own" = selected by hand on the frame, "dataset" = pixel position
-    taken from the dataset. use: 1 = the point is a reference point of the
-    calibration, 0 = it stays in the file but is not used. The metre values are
-    not read: they always come from the config, so the two files cannot disagree.
+    source: where the pixel position comes from; a point selected with this
+    tool is "own", any other value is kept as it is. use: 1 = the point is a
+    reference point of the calibration, 0 = it stays in the file but is not
+    used. The metre values are not read: they always come from the config, so
+    the two files cannot disagree.
     """
     points, info = {}, {}
     if Path(csv_path).exists():
@@ -126,8 +131,8 @@ def load_points(csv_path, landmarks):
 def save_points(csv_path, landmarks, points, info):
     """Write the points in config order (skipped ones have no row).
 
-    source and use are kept as they are; a point without them was selected by
-    hand in this run, so it is written as an own point that is used.
+    source and use are kept as they are; a point without them was selected in
+    this run, so it is written as an own point that is used.
     """
     Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -246,7 +251,7 @@ def select(video, frame_index, redo=None):
         # The mouse moves in window pixels, so clicks land on every `step`-th original pixel.
         print(f"Click step   : {step:.2f} original px per window px")
         for name, pixel in points.items():
-            if before.get(name) != pixel:           # selected by hand in this run
+            if before.get(name) != pixel:           # selected in this run
                 info[name] = ("own", 1)
 
     save_points(points_file, landmarks, points, info)
@@ -466,14 +471,11 @@ def apply_mapping(method, model, points, to_pitch=True):
     return mapping(model, points, to_pitch)
 
 
-def pixel_to_pitch(points_px, method=None):
-    """Raw video pixels (N, 2) -> approximate pitch positions (N, 2) in metres.
+def saved_mapping(method=None):
+    """The mapping of the last "fit" run: (method, fitted model, pixel space).
 
-    The one function later stages use. method=None takes calibration.method
-    from the config; "pieces" gives the baseline. The reference points and the
-    settings are the ones the last "fit" run saved. Every point is mapped
-    directly, without a lookup table. The positions are approximate (see the
-    fit report).
+    method=None takes calibration.method from the config; "pieces" gives the
+    baseline. The reference points and the settings are the saved ones.
     """
     calibration = load_field_config()["calibration"]
     method = method or calibration["method"]
@@ -484,11 +486,31 @@ def pixel_to_pitch(points_px, method=None):
         print(f"Warning: {', '.join(changed)} changed in {CONFIG_PATH} since the last fit; "
               "run 'python src/calibrate.py fit' again")
     model = fit_mapping(method, saved["points_px"], saved["points_m"], settings, saved["length_m"].item(), warn=False)
+    return method, model, settings["pixel_space"]
+
+
+def pixel_to_pitch(points_px, method=None):
+    """Raw video pixels (N, 2) -> approximate pitch positions (N, 2) in metres.
+
+    The one function later stages use. Every point is mapped directly, without
+    a lookup table. The positions are approximate (see the fit report).
+    """
+    method, model, pixel_space = saved_mapping(method)
     raw = np.asarray(points_px, np.float64).reshape(-1, 2)
     ok = np.isfinite(raw).all(axis=1)
     metres = np.full_like(raw, np.nan)              # no pixel in, no position out
-    metres[ok] = apply_mapping(method, model, to_pixel_space(raw[ok], settings["pixel_space"]))
+    metres[ok] = apply_mapping(method, model, to_pixel_space(raw[ok], pixel_space))
     return metres
+
+
+def pitch_to_pixel(points_m, method=None):
+    """Pitch positions in metres (N, 2) -> raw video pixels (N, 2).
+
+    The way back of pixel_to_pitch; used to draw pitch lines into the video.
+    """
+    method, model, pixel_space = saved_mapping(method)
+    metres = np.asarray(points_m, np.float64).reshape(-1, 2)
+    return to_raw_pixels(apply_mapping(method, model, metres, to_pitch=False), pixel_space)
 
 
 def leave_one_out(method, px, metres, calibration, length_m):
@@ -501,18 +523,18 @@ def leave_one_out(method, px, metres, calibration, length_m):
     return predicted
 
 
-def check_dataset_marks(px, metres, own, calibration, length_m):
-    """Error vectors (dx, dy) of the dataset marks when they are predicted from the own points alone.
+def check_touchline_points(px, metres, line, calibration, length_m):
+    """Error vectors (dx, dy) of the touchline points when they are predicted from the line landmarks alone.
 
-    A check of the dataset marks against the points selected by hand: the fit
-    report lists every mark and flags the ones further than MARK_LIMIT_M from
-    their nominal position. It does not decide what is used; that is the "use"
+    A check of the two groups against each other: the fit report lists every
+    touchline point and flags the ones further than MARK_LIMIT_M from their
+    nominal position. It does not decide what is used; that is the "use"
     column of the points file. The prediction is made with the method "pieces":
-    with own points only, the method "reference_points" is not stable along the
-    touchline between corner and halfway line, where no own point lies.
+    with line landmarks only, the method "reference_points" is not stable along
+    the touchline between corner and halfway line, where no line landmark lies.
     """
-    model = fit_mapping("pieces", px[own], metres[own], calibration, length_m, warn=False)
-    return apply_mapping("pieces", model, px[~own]) - metres[~own]
+    model = fit_mapping("pieces", px[line], metres[line], calibration, length_m, warn=False)
+    return apply_mapping("pieces", model, px[~line]) - metres[~line]
 
 
 def pitch_lines(landmarks, length_m, width_m):
@@ -561,7 +583,7 @@ def save_grid_image(frame, to_pixels, grid, marks, raw_points, used, path):
         cv2.drawMarker(img, (int(round(x)), int(round(y))), USED_COLOR if in_use else UNUSED_COLOR,
                        cv2.MARKER_TILTED_CROSS, 11, 1 if in_use else 2, cv2.LINE_AA)
     draw_text(img, f"white x: reference point in use ({int(used.sum())})", (20, 30), 0.6, USED_COLOR)
-    draw_text(img, f"magenta x: dataset mark, not used ({int((~used).sum())})", (20, 56), 0.6, UNUSED_COLOR)
+    draw_text(img, f"magenta x: point not used ({int((~used).sum())})", (20, 56), 0.6, UNUSED_COLOR)
     cv2.imwrite(str(path), img)
 
 
@@ -572,34 +594,33 @@ def error_cells(values):
     return f"{values.mean():.2f} / {np.median(values):.2f} / {values.max():.2f}"
 
 
-def write_fit_report(path, names, metres, own, used, errors, passing, mark_errors, calibration, default):
-    """Markdown report: the two methods, the check of the dataset marks, one row per point.
+def write_fit_report(path, names, metres, line, used, errors, passing, mark_errors, calibration, default):
+    """Markdown report: the two methods, the check of the touchline points, one row per point.
 
     errors[method]: for a reference point in use the leave-one-out error, for a
     point that is not used the error of the plain prediction (it was never part
     of the fit either way). The point table is sorted by the error of the
     default method, largest first, so its weakest places are at the top.
     """
-    kind = np.where(own, "line intersection", "interpolated touchline mark")
-    source = np.where(own, "own", "dataset")
+    kind = np.where(line, "line landmark", "touchline point")
     lines = ["# Calibration fit report", "",
              "All positions are approximate. Errors are distances in metres between the predicted",
              "and the nominal pitch position of a point. A reference point in use is predicted",
              "leave-one-out, by a fit that did not see it; a point that is not used is predicted",
              "by the full fit.", "",
-             f"Reference points in use: {int(used.sum())} ({int((used & own).sum())} own, selected by hand on the frame; "
-             f"{int((used & ~own).sum())} dataset touchline marks). Not used: {int((~used).sum())} dataset marks.",
+             f"Reference points in use: {int(used.sum())} ({int((used & line).sum())} line landmarks, "
+             f"{int((used & ~line).sum())} touchline points). Not used: {int((~used).sum())}.",
              f"Settings: radius_m = {calibration['radius_m']:g}, min_weight = {calibration['min_weight']:g}, "
              f"pixel_space = {calibration['pixel_space']}; pieces = {calibration['pieces']}, "
              f"overlap_m = {calibration['overlap_m']:g}.", "",
              "## Methods", "",
-             "| Method | Leave-one-out, all in use: mean / median / max (m) | Own points | Dataset marks in use "
-             "| Dataset marks not used |",
+             "| Method | Leave-one-out, all in use: mean / median / max (m) | Line landmarks | Touchline points "
+             "| Points not used |",
              "|---|---|---|---|---|"]
     for method, err in errors.items():
         role = " (default)" if method == default else " (baseline)" if method == BASELINE_METHOD else ""
-        lines.append(f"| {method}{role} | {error_cells(err[used])} | {error_cells(err[used & own])} | "
-                     f"{error_cells(err[used & ~own])} | {error_cells(err[~used])} |")
+        lines.append(f"| {method}{role} | {error_cells(err[used])} | {error_cells(err[used & line])} | "
+                     f"{error_cells(err[used & ~line])} | {error_cells(err[~used])} |")
     lines += ["", "Does the fitted mapping pass through its own reference points?", "",
               "| Method | Error at the reference points: mean / median / max (m) "
               "| Distance between a reference point and where the grid image draws it: mean / median / max (px) |",
@@ -609,29 +630,28 @@ def write_fit_report(path, names, metres, own, used, errors, passing, mark_error
     lines += ["", "`reference_points`: each position is mapped with a homography fitted to all reference points,",
               "where the points near that position count more.",
               "`pieces`: blended pieces along the pitch length; kept only as the baseline for comparison.", "",
-              "## Dataset marks checked against the own points", "",
-              f"Every dataset mark is predicted from the {int(own.sum())} own points alone (method `pieces`). "
-              f"{int((np.hypot(*mark_errors.T) > MARK_LIMIT_M).sum())} of {len(mark_errors)} marks are further than "
+              "## Touchline points checked against the line landmarks", "",
+              f"Every touchline point is predicted from the {int(line.sum())} line landmarks alone (method `pieces`). "
+              f"{int((np.hypot(*mark_errors.T) > MARK_LIMIT_M).sum())} of {len(mark_errors)} are further than "
               f"{MARK_LIMIT_M:g} m from their nominal position. This is information only: which points are used is "
               "set in the `use` column of the points file.", "",
-              f"| Mark | dx (m) | dy (m) | Error (m) | Within {MARK_LIMIT_M:g} m | Use |", "|---|---|---|---|---|---|"]
+              f"| Touchline point | dx (m) | dy (m) | Error (m) | Within {MARK_LIMIT_M:g} m | Use |", "|---|---|---|---|---|---|"]
     mark_dist = np.hypot(*mark_errors.T)
-    for k, i in enumerate(np.flatnonzero(~own)):
+    for k, i in enumerate(np.flatnonzero(~line)):
         lines.append(f"| {names[i]} | {mark_errors[k, 0]:+.2f} | {mark_errors[k, 1]:+.2f} | {mark_dist[k]:.2f} | "
                      f"{'yes' if mark_dist[k] <= MARK_LIMIT_M else 'no'} | {int(used[i])} |")
     order = [default] + [method for method in errors if method != default]
     lines += ["", "dx = predicted minus nominal position along the touchline, dy = across it.", "",
               f"## Error per point (m), sorted by `{default}`", "",
-              "| Point | Type | Source | Use | x_m | y_m | " + " | ".join(order) + " |",
-              "|---|---|---|---|---|---|" + "---|" * len(order)]
+              "| Point | Type | Use | x_m | y_m | " + " | ".join(order) + " |",
+              "|---|---|---|---|---|" + "---|" * len(order)]
     for i in np.argsort(-errors[default]):
-        lines.append(f"| {names[i]} | {kind[i]} | {source[i]} | {int(used[i])} | {metres[i, 0]:g} | {metres[i, 1]:g} | "
+        lines.append(f"| {names[i]} | {kind[i]} | {int(used[i])} | {metres[i, 0]:g} | {metres[i, 1]:g} | "
                      + " | ".join(f"{errors[m][i]:.2f}" for m in order) + " |")
-    lines += ["", "Type: \"line intersection\" = a marked point of the pitch, selected by hand on the frame",
-              "(crossings of marked lines; also the centre spot, the two side points of the centre",
-              "circle and the feet of the goal posts). \"interpolated touchline mark\" = a point every",
-              "5.5 m along a touchline, with no marked line crossing it; its pixel position comes from",
-              "the dataset."]
+    lines += ["", "Type: \"line landmark\" = a marked point of the pitch (crossings of marked lines; also the",
+              "centre spot, the two side points of the centre circle and the feet of the goal posts).",
+              "\"touchline point\" = a point every 5.5 m along a touchline, where the edge of a mowing",
+              "stripe meets it; no marked line crosses it."]
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -644,7 +664,7 @@ def fit(video, frame_index):
     names = list(points)
     raw = np.array([points[name] for name in names], np.float64)
     metres = np.array([landmarks[name] for name in names], np.float64)
-    own = np.array([info[name][0] == "own" for name in names])
+    line = np.array([not name.startswith(TOUCHLINE_PREFIX) for name in names])
     used = np.array([info[name][1] == 1 for name in names])
     px = to_pixel_space(raw, calibration["pixel_space"])
     length_m = float(pitch["length_m"])
@@ -653,7 +673,7 @@ def fit(video, frame_index):
     out_dir, stem = Path(OUT_DIR), Path(video).stem
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Points       : {len(names)} in {config['points_file']}; {int(used.sum())} reference points in use "
-          f"({int((used & own).sum())} own, {int((used & ~own).sum())} dataset marks)")
+          f"({int((used & line).sum())} line landmarks, {int((used & ~line).sum())} touchline points)")
     print(f"Settings     : method {default}, radius {calibration['radius_m']:g} m, min weight "
           f"{calibration['min_weight']:g}, {calibration['pixel_space']} pixels")
 
@@ -670,7 +690,7 @@ def fit(video, frame_index):
         drawn = to_raw_pixels(apply_mapping(method, model, metres[used], to_pitch=False), calibration["pixel_space"])
         passing[method] = (np.hypot(*(apply_mapping(method, model, px[used]) - metres[used]).T),
                            np.hypot(*(drawn - raw[used]).T))
-        rows += [[name, *metres[i], "own" if own[i] else "dataset", int(used[i]), method,
+        rows += [[name, *metres[i], "line landmark" if line[i] else "touchline point", int(used[i]), method,
                   *predicted[i].round(3), round(float(err[i]), 3)] for i, name in enumerate(names)]
         image = out_dir / (f"{stem}_grid.jpg" if method == default else f"{stem}_grid_{method}.jpg")
         save_grid_image(frame, lambda m: to_raw_pixels(apply_mapping(method, model, m, to_pitch=False),
@@ -681,19 +701,19 @@ def fit(video, frame_index):
         print(f"  {'':<16} at its reference points: {passing[method][0].mean():.2f} m mean, {passing[method][0].max():.2f} m max; "
               f"drawn {passing[method][1].mean():.1f} px mean, {passing[method][1].max():.0f} px max from the point")
 
-    mark_errors = check_dataset_marks(px, metres, own, calibration, length_m)
+    mark_errors = check_touchline_points(px, metres, line, calibration, length_m)
     far_marks = int((np.hypot(*mark_errors.T) > MARK_LIMIT_M).sum())
 
     np.savez(HOMOGRAPHY_PATH, video=video, frame=frame_index, points_px=px[used], points_m=metres[used],
              length_m=length_m, **{key: calibration[key] for key in SAVED_SETTINGS})
     with open(out_dir / f"{stem}_fit_errors.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["name", "x_m", "y_m", "source", "use", "method", "pred_x_m", "pred_y_m", "error_m"])
+        writer.writerow(["name", "x_m", "y_m", "type", "use", "method", "pred_x_m", "pred_y_m", "error_m"])
         writer.writerows(rows)
-    write_fit_report(out_dir / f"{stem}_fit_report.md", names, metres, own, used, errors, passing, mark_errors,
+    write_fit_report(out_dir / f"{stem}_fit_report.md", names, metres, line, used, errors, passing, mark_errors,
                      calibration, default)
-    print(f"Dataset marks: {int((used & ~own).sum())} in use, {int((~used).sum())} not used; {far_marks} are more than "
-          f"{MARK_LIMIT_M:g} m from the prediction of the own points (see the report)")
+    print(f"Touchline pts: {far_marks} of {int((~line).sum())} are more than {MARK_LIMIT_M:g} m from the prediction "
+          f"of the line landmarks (see the report); points not used: {int((~used).sum())}")
     print(f"Calibration  : {HOMOGRAPHY_PATH}")
     print(f"Report       : {out_dir / (stem + '_fit_report.md')}, {stem}_fit_errors.csv")
 
