@@ -146,3 +146,13 @@ calibration:
   # reaches into its neighbours when its homography is fitted.
   pieces: 3
   overlap_m: 10
+
+# Metric movement ("python src/movement.py").
+# The reference positions and speeds of the dataset are used only to check
+# our values: clip frame j = reference frameNumber reference_offset + j.
+reference_offset: 6252
+# Smoothing of x_m, y_m (centred moving average, frames) and the time over
+# which a speed is measured (seconds). Both are chosen against the reference
+# by "python src/movement.py params", which writes them here.
+smooth_frames: 5
+speed_window_s: 1

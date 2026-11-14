@@ -869,3 +869,143 @@ Observations:
   noise in metric speed and has to be handled when speed is computed.
 - All positions are approximate (see "The calibration passes through the
   reference points" above).
+
+---
+
+## 2026-11-14 — Metric speed and distance
+
+**Goal:** compute speed (m/s, km/h) and distance from the metric positions,
+and choose the smoothing and the speed window against the reference of the
+dataset instead of guessing them.
+
+### Commands
+
+```
+python src/movement.py params     # choose smooth_frames and speed_window_s, write them to the config
+python src/movement.py            # movement table, summaries and figures with the config values
+```
+
+### Reference
+
+- `load_reference()` reads the first half of
+  `data/referans/raw/118575/118575_tracker_box_data.xml` (position and speed
+  of every player in every frame, see `docs/data.md`) and caches it as `.npy`
+  in `outputs/validation/118575/` (not versioned).
+- Clip frame `j` = reference `frameNumber` `6252 + j`; the offset is kept as
+  `reference_offset` in `config/field_config.yaml`.
+- `reference_for_tracks()` assigns every GT track to a reference player:
+  in every 10th frame our metric positions are matched to the reference
+  positions (Hungarian matching), and the player matched most often wins.
+  Lowest vote share of a track: 95.7 %. The table is saved as
+  `outputs/validation/118575/id_map.csv`.
+- The reference is used only to check our values and to choose the two
+  parameters. No position or speed is taken from it.
+
+### Method (`src/movement.py` v3, `add_metric_speed()`)
+
+All values are computed inside one piece of a track; a gap (`gap_flag`)
+starts a new piece, so neither the smoothing nor a speed window reaches
+across it.
+
+| Column | Content |
+|---|---|
+| `x_m_smooth`, `y_m_smooth` | centred moving average of `x_m`, `y_m` over `smooth_frames` frames |
+| `speed_mps` | distance between the smoothed positions `k` frames before and after the row, divided by the time between them; `2k / fps` = `speed_window_s` |
+| `speed_kmh` | `speed_mps * 3.6` |
+| `dist_m` | length of the step from the previous smoothed position |
+| `speed_mps_raw` | frame-to-frame speed of the unsmoothed positions, kept only to show the effect |
+| `speed_flag` | 1 if `speed_mps > 10.0`; flagged rows are kept |
+
+- `k` is rounded down to whole frames: 0.5 s uses 12 frames (0.48 s), 1 s
+  uses 24 frames (0.96 s). The speed is divided by the real time span.
+- At the ends of a piece the widest symmetric window that fits is used
+  (at least 2 frames on each side); below that the speed is empty. This
+  leaves 88 rows without a speed (the first two and the last two rows of
+  every track).
+- Why smoothing is needed: the raw frame-to-frame speed has a median of
+  3.6 m/s, a p99 of 28 m/s and a maximum of 235 m/s; 21.5 % of the rows are
+  above 10 m/s. Far from the camera one pixel is about half a metre, so a
+  box that moves by one pixel between two frames looks like 12 m/s.
+
+### Parameter test
+
+Grid: `smooth_frames` 5, 9, 13, 25 x `speed_window_s` 0.5, 1.0. Our speed
+and the reference speed are averaged in 1 s bins per track (2640 bins).
+Bias = ours minus reference. Distance = per-track sum of `dist_m` against
+the reference speed summed over the same frames. Peak = fastest moment of
+every track against the 5-frame smoothing with the same speed window.
+
+| smooth_frames | speed_window_s | MAE (m/s) | Bias (m/s) | Correlation | Ours p95 / p99 / max (m/s) | Distance difference (%) | Peak vs 5 frames (%) |
+|---|---|---|---|---|---|---|---|
+| 5 | 0.5 | 0.261 | +0.113 | 0.964 | 5.37 / 6.72 / 8.56 | 38.3 | 0.0 |
+| 9 | 0.5 | 0.238 | +0.066 | 0.969 | 5.32 / 6.64 / 8.46 | 15.9 | -10.4 |
+| 13 | 0.5 | 0.218 | +0.026 | 0.974 | 5.32 / 6.60 / 8.38 | 7.9 | -15.6 |
+| 25 | 0.5 | 0.195 | -0.066 | 0.982 | 5.24 / 6.48 / 8.22 | 1.6 | -24.5 |
+| **5** | **1.0** | **0.191** | **-0.030** | 0.982 | 5.27 / 6.52 / 8.21 | 38.3 | 0.0 |
+| 9 | 1.0 | 0.191 | -0.047 | 0.982 | 5.26 / 6.49 / 8.23 | 15.9 | -3.4 |
+| 13 | 1.0 | 0.193 | -0.061 | 0.982 | 5.24 / 6.48 / 8.23 | 7.9 | -5.4 |
+| 25 | 1.0 | 0.199 | -0.103 | 0.983 | 5.18 / 6.42 / 8.10 | 1.6 | -8.6 |
+
+Reference speed in the same bins: p95 5.30, p99 6.60, max 7.71 m/s.
+
+### Chosen values
+
+Rule, fixed before the run: among the pairs whose mean absolute error is
+within 0.02 m/s of the best (0.191 m/s), take the one with the bias closest
+to zero; if equal, the shorter smoothing window.
+
+**`smooth_frames: 5`, `speed_window_s: 1`** (written to
+`config/field_config.yaml` by the `params` run). Five pairs are within the
+tie band; this one has the smallest bias (-0.030 m/s). With these values:
+
+| Measure | Value |
+|---|---|
+| Speed, mean absolute error against the reference | 0.191 m/s |
+| Speed, bias | -0.030 m/s |
+| Correlation | 0.982 |
+| Our speed: median / p95 / max | 6.1 / 19.2 / 34.8 km/h |
+| Rows with `speed_flag = 1` | 0 |
+| Rows without a speed | 88 (0.13 %) |
+
+The 1 s speed window does most of the work: with it the speed error is
+almost the same for every smoothing window (0.191 to 0.199 m/s), while with
+0.5 s it depends strongly on the smoothing (0.261 to 0.195 m/s).
+
+### Limit: the summed distance is too long
+
+The rule looks at speed only. `dist_m` depends only on the smoothing, and
+with 5 frames the summed distance per track is **38.3 % above the
+reference** (363 m against 267 m on average). A step from frame to frame
+adds up the jitter that is left in the positions; the speed does not suffer
+from this, because it measures over one second. The difference falls to
+15.9 %, 7.9 % and 1.6 % for 9, 13 and 25 frames, but long smoothing
+flattens sprints: the fastest moment of a track drops by 24.5 % (0.5 s
+window) or 8.6 % (1 s window) with 25 frames.
+
+As a cross-check that is not an output of the script: summing `speed_mps`
+over time instead of the steps gives a distance within 1.9 % of the
+reference for the chosen values. The `distance_m` column of
+`speed_summary.csv` is the sum of `dist_m` and therefore too long; this is
+open and has to be settled before distances are reported.
+
+### Figure
+
+![Metric speed against the reference](../outputs/movement/118575_gt/speed_metric.png)
+
+(a) Speed of every row, ours and reference: the two distributions agree.
+(b) Track 13, the track with the fastest reference moment: the raw
+frame-to-frame speed (grey) is far off the scale, the chosen setting (blue)
+follows the reference (orange). The reference peak at 52 s is not in our
+positions.
+
+### Outputs
+
+- `outputs/movement/118575_gt/movement.csv`: the new columns above; every
+  earlier column is unchanged (12 MB, not versioned).
+- `outputs/movement/118575_gt/speed_summary.csv`: per track the distance
+  (m), mean, median, p95 and maximum speed (km/h) and the share of flagged
+  rows.
+- `outputs/movement/118575_gt/speed_param_test.md`: the table above and the
+  choice.
+- `outputs/movement/118575_gt/speed_metric.png`: the figure.
+- All positions, speeds and distances are approximate.

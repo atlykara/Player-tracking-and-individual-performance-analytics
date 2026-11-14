@@ -44,3 +44,7 @@ outputs/movement/*/*
 !outputs/movement/*/consistency_report.md
 # Top view of the metric positions: one small figure, versioned.
 !outputs/movement/*/positions_pitch.png
+# Metric speed: summary per track, parameter table and figure (small, versioned).
+!outputs/movement/*/speed_summary.csv
+!outputs/movement/*/speed_param_test.md
+!outputs/movement/*/speed_metric.png
