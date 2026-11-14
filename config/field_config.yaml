@@ -73,6 +73,76 @@ landmarks:
   right_post_far:           {x_m: 105.0, y_m: 30.34}
   right_post_near:          {x_m: 105.0, y_m: 37.66}
 
-# Clicked pixel positions of the landmarks (name, x_m, y_m, px_x, px_y),
-# written by "python src/calibrate.py select".
+  # Touchline points every 5.5 m (x_m = 5.5 ... 49.5 from the left goal line,
+  # 55.5 ... 99.5 = the same distances from the right goal line). No pitch
+  # line crosses the touchline there: the dataset marks them where the edges
+  # of the mowing stripes meet the touchline. Their pixel positions are NOT
+  # clicked; they are taken from the dataset keypoint file
+  # (118575_keypoints.json). They were added because the 31 clicked
+  # landmarks give only three points on each touchline.
+  # Far touchline
+  touchline_far_5.5m:       {x_m: 5.5,   y_m: 0.0}
+  touchline_far_11m:        {x_m: 11.0,  y_m: 0.0}
+  touchline_far_16.5m:      {x_m: 16.5,  y_m: 0.0}
+  touchline_far_22m:        {x_m: 22.0,  y_m: 0.0}
+  touchline_far_27.5m:      {x_m: 27.5,  y_m: 0.0}
+  touchline_far_33m:        {x_m: 33.0,  y_m: 0.0}
+  touchline_far_38.5m:      {x_m: 38.5,  y_m: 0.0}
+  touchline_far_44m:        {x_m: 44.0,  y_m: 0.0}
+  touchline_far_49.5m:      {x_m: 49.5,  y_m: 0.0}
+  touchline_far_55.5m:      {x_m: 55.5,  y_m: 0.0}
+  touchline_far_61m:        {x_m: 61.0,  y_m: 0.0}
+  touchline_far_66.5m:      {x_m: 66.5,  y_m: 0.0}
+  touchline_far_72m:        {x_m: 72.0,  y_m: 0.0}
+  touchline_far_77.5m:      {x_m: 77.5,  y_m: 0.0}
+  touchline_far_83m:        {x_m: 83.0,  y_m: 0.0}
+  touchline_far_88.5m:      {x_m: 88.5,  y_m: 0.0}
+  touchline_far_94m:        {x_m: 94.0,  y_m: 0.0}
+  touchline_far_99.5m:      {x_m: 99.5,  y_m: 0.0}
+
+  # Near touchline
+  touchline_near_5.5m:      {x_m: 5.5,   y_m: 68.0}
+  touchline_near_11m:       {x_m: 11.0,  y_m: 68.0}
+  touchline_near_16.5m:     {x_m: 16.5,  y_m: 68.0}
+  touchline_near_22m:       {x_m: 22.0,  y_m: 68.0}
+  touchline_near_27.5m:     {x_m: 27.5,  y_m: 68.0}
+  touchline_near_33m:       {x_m: 33.0,  y_m: 68.0}
+  touchline_near_38.5m:     {x_m: 38.5,  y_m: 68.0}
+  touchline_near_44m:       {x_m: 44.0,  y_m: 68.0}
+  touchline_near_49.5m:     {x_m: 49.5,  y_m: 68.0}
+  touchline_near_55.5m:     {x_m: 55.5,  y_m: 68.0}
+  touchline_near_61m:       {x_m: 61.0,  y_m: 68.0}
+  touchline_near_66.5m:     {x_m: 66.5,  y_m: 68.0}
+  touchline_near_72m:       {x_m: 72.0,  y_m: 68.0}
+  touchline_near_77.5m:     {x_m: 77.5,  y_m: 68.0}
+  touchline_near_83m:       {x_m: 83.0,  y_m: 68.0}
+  touchline_near_88.5m:     {x_m: 88.5,  y_m: 68.0}
+  touchline_near_94m:       {x_m: 94.0,  y_m: 68.0}
+  touchline_near_99.5m:     {x_m: 99.5,  y_m: 68.0}
+
+# Pixel positions of the landmarks, written by "python src/calibrate.py select":
+#   name, x_m, y_m, px_x, px_y, source, use
+#   source  own = selected by hand on the video frame, dataset = touchline
+#           mark whose pixel position comes from the dataset
+#   use     1 = reference point of the calibration, 0 = kept in the file
+#           but not used. All 67 points are in use. "fit" reports how far
+#           each dataset mark is from the prediction of the own points.
 points_file: config/calibration_points.csv
+
+# Pixel -> metre mapping ("python src/calibrate.py fit"). The calibration is
+# built from the reference points (use = 1 in the points file).
+calibration:
+  # reference_points: each position is mapped with a homography fitted to all
+  #   reference points, where the points near that position count more. The
+  #   mapping passes through the reference points themselves, so the pitch
+  #   lines in the grid image run through them.
+  # pieces: the pitch is cut into equal pieces along x, one homography per
+  #   piece, neighbouring pieces blended. Only the baseline for comparison.
+  method: reference_points
+  radius_m: 30          # reference points within this distance count most
+  min_weight: 0.05      # smallest weight a far reference point keeps
+  pixel_space: undistorted   # lens model: config/118575_camera_intrinsics.npz
+  # Method "pieces" only: number of equal pieces along x, and how far a piece
+  # reaches into its neighbours when its homography is fitted.
+  pieces: 3
+  overlap_m: 10

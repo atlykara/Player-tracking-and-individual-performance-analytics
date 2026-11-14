@@ -5,7 +5,7 @@
 - **Dataset:** SoccerTrack v2, match **118575**, MOT challenge clip
   (SoccerTrack Challenge 2025, training set).
 - **Files used:** `118575.mp4` (video) and `118575.txt` (MOT bounding-box
-  ground truth), stored locally in `data/SoccerTrackv2/mot/`.
+  ground truth), stored in `data/SoccerTrackv2/mot/`.
 - **License:** CC BY 4.0.
 - Raw and derived data are not committed (`data/` is git-ignored).
 
@@ -169,9 +169,17 @@ from them is approximate.
 
 ### Landmarks
 
-A landmark is a named point where a marked line meets or crosses another
-one, so the same point can be found both in the image and on the model.
-`field_config.yaml` lists 31 of them, each with `x_m` and `y_m`.
+A landmark is a named point that can be found both in the image and on the
+model. `field_config.yaml` lists 67 of them, each with `x_m` and `y_m`:
+
+- **31 line landmarks**, where a marked line meets or crosses another one.
+  Their pixel positions were clicked by hand (`calibrate.py select`).
+- **36 touchline points**, every 5.5 m along both touchlines. No marked line
+  crosses the touchline there; the dataset marks them where the edges of
+  the mowing stripes meet the touchline. Their pixel positions were **not
+  clicked**: they are taken from the dataset keypoint file
+  (`118575_keypoints.json`, key `"(x_m,y_m)"` -> pixel). They were added
+  because the line landmarks give only three points on each touchline.
 
 Naming: `<object>_<side>`.
 
@@ -190,6 +198,7 @@ Naming: `<object>_<side>`.
 | Penalty areas | `left_pen_*`, `right_pen_*`: `far_goal`, `near_goal`, `far_in`, `near_in` |
 | Goal areas | `left_goalarea_*`, `right_goalarea_*`: the same four corners |
 | Goal posts | `left_post_far`, `left_post_near`, `right_post_far`, `right_post_near` (foot of the post on the goal line; optional) |
+| Touchline points | `touchline_far_<x>m`, `touchline_near_<x>m` with `<x>` = 5.5, 11, ... 49.5 and 55.5, 61, ... 99.5 (18 per touchline; pixels from the dataset) |
 
 The right side mirrors the left side (`x -> 105 - x`). Line dimensions used:
 penalty area 16.5 m deep and 40.32 m wide, goal area 5.5 m deep and 18.32 m
@@ -199,6 +208,61 @@ wide, goal 7.32 m wide, centre circle radius 9.15 m.
 marked line passes through them, so they are harder to click than the other
 landmarks.
 
-The clicked pixel position of each landmark is stored in
-`config/calibration_points.csv` (`name, x_m, y_m, px_x, px_y`; pixels of the
-original 4096 x 1080 frame). A landmark that could not be clicked has no row.
+The pixel position of each landmark is stored in
+`config/calibration_points.csv` (pixels of the original 4096 x 1080 frame).
+A landmark without a pixel position has no row.
+
+| Column | Content |
+|---|---|
+| `name`, `x_m`, `y_m` | landmark name and its position in metres |
+| `px_x`, `px_y` | pixel position on frame 0 |
+| `source` | `own` = selected by hand on the frame (the 31 line landmarks); `dataset` = pixel position taken from the dataset (the 36 touchline points) |
+| `use` | `1` = reference point of the calibration; `0` = kept in the file but not used |
+
+All 67 rows have `use = 1`: the calibration is built from the 31 own points
+and the 36 touchline points, and it passes through every one of them. 15
+touchline points (14 on the far touchline) are more than 2 m from where the
+own points alone put them; the fit report lists them. See "The calibration
+passes through the reference points" in `docs/experiments.md`.
+
+## Reference positions of the players
+
+The dataset also gives the pitch position and the speed of every player for
+the whole match. They are used only to check our positions and speeds,
+never to produce them.
+
+- **File:** `data/referans/raw/118575/118575_tracker_box_data.xml` (227 MB,
+  not versioned). Player ids, teams and the pitch size
+  (`<pitch width="105" height="68"/>`) are in
+  `118575_tracker_box_metadata.xml` in the same folder.
+- **Structure:** one `<frame>` per video frame, one `<player>` per player
+  on the pitch, plus the ball:
+
+```
+<frame matchTime="1439967" frameNumber="36251" eventPeriod="FIRST_HALF" ballStatus="NEUTRAL">
+  <player playerId="476352" loc="[0.06, 0.48]" speed="0.57"/>
+  ...
+  <ball playerId="ball" loc="[0.42, 0.17]" speed="NA"/>
+</frame>
+```
+
+| Field | Meaning | Unit |
+|---|---|---|
+| `frameNumber` | frame counter inside the period, 25 fps; the first half runs from 251 to 72351 | frames |
+| `eventPeriod` | `FIRST_HALF` or `SECOND_HALF`; the frame counter starts again in the second half | - |
+| `matchTime` | time since kick-off | ms |
+| `playerId` | player id from the metadata file | - |
+| `loc` | `[x, y]`, position as a fraction of the pitch length and width | `x_m = 105 * x`, `y_m = 68 * y`; same axes as ours, no flip |
+| `speed` | speed of the player | m/s |
+
+`loc` has two decimals, so the reference positions lie on a grid of
+1.05 m x 0.68 m.
+
+**Clip offset:** clip frame `j` = reference `frameNumber` `6252 + j`
+(first half). The working clip starts 240.0 s after the first reference
+frame. The offset was found by matching our 22 player positions to the
+reference positions of the same instant (Hungarian matching) for 30 clip
+frames and taking the median of the best offsets; the median player
+position error is lowest at exactly this offset. Each GT track was assigned
+to the reference player it was matched with most often (lowest share
+93.3 %).
